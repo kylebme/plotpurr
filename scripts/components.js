@@ -157,8 +157,8 @@ const QuerySettings = ({ settings, onChange }) => (
         </label>
         <input
           type="range"
-          min="500"
-          max="10000"
+          min="1000"
+          max="20000"
           step="500"
           value={settings.maxPoints}
           onChange={(e) => onChange({ ...settings, maxPoints: parseInt(e.target.value) })}
@@ -386,6 +386,11 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   const isZooming = useRef(false);
   const [interactionMode, setInteractionMode] = useState("box"); // "box" or "pan"
   const [shiftDown, setShiftDown] = useState(false);
+  const shiftDownRef = useRef(false);
+  const xDomainRef = useRef({ min: null, max: null });
+  const wheelZoomTimeoutRef = useRef(null);
+  const [showLoader, setShowLoader] = useState(false);
+  const loaderTimerRef = useRef(null);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -410,6 +415,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     const domainEnd = fullTimeRange?.max ?? fullTimeRange?.end ?? viewRange?.max ?? viewRange?.end;
     const rangeStart = viewRange?.start ?? viewRange?.min ?? domainStart;
     const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
+    xDomainRef.current = { min: domainStart, max: domainEnd };
 
     const series = seriesList.map((s, idx) => ({
       name: s.name || `${s.file} • ${s.column}`,
@@ -529,8 +535,8 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           throttle: 100,
           startValue: rangeStart,
           endValue: rangeEnd,
-          zoomOnMouseWheel: !shiftDown,
-          moveOnMouseWheel: !shiftDown,
+          zoomOnMouseWheel: false,
+          moveOnMouseWheel: false,
           moveOnMouseMove: interactionMode === "pan" && !shiftDown,
         },
         {
@@ -559,7 +565,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           yAxisIndex: 0,
           filterMode: "none",
           throttle: 100,
-          zoomOnMouseWheel: shiftDown,
+          zoomOnMouseWheel: false,
           moveOnMouseWheel: false,
           moveOnMouseMove: interactionMode === "pan" && shiftDown,
         },
@@ -647,6 +653,10 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   }, []);
 
   useEffect(() => {
+    shiftDownRef.current = shiftDown;
+  }, [shiftDown]);
+
+  useEffect(() => {
     if (!chartInstance.current) return;
     if (interactionMode === "box") {
       chartInstance.current.dispatchAction({
@@ -679,6 +689,135 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     isZooming.current = false;
   }, [resetToken]);
 
+  useEffect(() => {
+    if (!chartInstance.current) return;
+    const zr = chartInstance.current.getZr();
+
+    const handleWheel = (e) => {
+      if (!chartInstance.current) return;
+      const delta = e.event?.deltaY ?? e.event?.wheelDelta ?? 0;
+      if (delta === 0) return;
+      e.event?.preventDefault?.();
+
+      const base = 1.0015;
+      const zoomFactor = Math.pow(base, delta);
+      if (!isFinite(zoomFactor) || zoomFactor === 1) return;
+
+      const shiftHeld = shiftDownRef.current || !!e.event?.shiftKey;
+
+      const point = chartInstance.current.convertFromPixel(
+        { xAxisIndex: 0, yAxisIndex: 0 },
+        [e.offsetX, e.offsetY]
+      );
+      const anchorX = point?.[0];
+      const anchorY = point?.[1];
+
+      const model = chartInstance.current.getModel();
+      if (!model) return;
+
+      const scheduleOnZoom = (min, max) => {
+        if (!onZoom) return;
+        if (wheelZoomTimeoutRef.current) {
+          clearTimeout(wheelZoomTimeoutRef.current);
+        }
+        wheelZoomTimeoutRef.current = setTimeout(() => {
+          wheelZoomTimeoutRef.current = null;
+          onZoom(min, max);
+        }, 200);
+      };
+
+      const applyZoom = (axis) => {
+        const comp = model.getComponent(axis === "x" ? "xAxis" : "yAxis", 0);
+        const extent = comp?.axis?.scale?.getExtent?.();
+        if (!extent || extent.length < 2) return;
+        let [curMin, curMax] = extent;
+        if (!isFinite(curMin) || !isFinite(curMax) || curMin === curMax) return;
+
+        const anchor = isFinite(axis === "x" ? anchorX : anchorY)
+          ? axis === "x"
+            ? anchorX
+            : anchorY
+          : (curMin + curMax) / 2;
+
+        const span = curMax - curMin;
+        let newSpan = span * zoomFactor;
+        const minSpan = span / 1e6 || 1e-9;
+        newSpan = Math.max(minSpan, newSpan);
+
+        let newMin = anchor - (anchor - curMin) * zoomFactor;
+        let newMax = newMin + newSpan;
+
+        if (axis === "x") {
+          const domainMin = xDomainRef.current.min ?? curMin;
+          const domainMax = xDomainRef.current.max ?? curMax;
+          const maxSpan = domainMax - domainMin;
+          newSpan = Math.min(newSpan, maxSpan);
+          newMin = Math.max(domainMin, Math.min(newMin, domainMax - newSpan));
+          newMax = newMin + newSpan;
+        }
+
+        isZooming.current = true;
+        if (axis === "x") {
+          chartInstance.current.dispatchAction({
+            type: "dataZoom",
+            dataZoomId: "x-inside",
+            startValue: newMin,
+            endValue: newMax,
+          });
+          chartInstance.current.dispatchAction({
+            type: "dataZoom",
+            dataZoomId: "x-slider",
+            startValue: newMin,
+            endValue: newMax,
+          });
+          isZooming.current = false;
+          scheduleOnZoom(newMin, newMax);
+        } else {
+          chartInstance.current.dispatchAction({
+            type: "dataZoom",
+            dataZoomId: "y-inside",
+            startValue: newMin,
+            endValue: newMax,
+          });
+          isZooming.current = false;
+        }
+      };
+
+      if (shiftHeld) {
+        applyZoom("y");
+      } else {
+        applyZoom("x");
+      }
+    };
+
+    zr.on("mousewheel", handleWheel);
+    return () => {
+      zr.off("mousewheel", handleWheel);
+      if (wheelZoomTimeoutRef.current) {
+        clearTimeout(wheelZoomTimeoutRef.current);
+      }
+    };
+  }, [onZoom]);
+
+  useEffect(() => {
+    if (loading) {
+      if (loaderTimerRef.current) clearTimeout(loaderTimerRef.current);
+      loaderTimerRef.current = setTimeout(() => setShowLoader(true), 120);
+    } else {
+      if (loaderTimerRef.current) {
+        clearTimeout(loaderTimerRef.current);
+        loaderTimerRef.current = null;
+      }
+      setShowLoader(false);
+    }
+    return () => {
+      if (loaderTimerRef.current) {
+        clearTimeout(loaderTimerRef.current);
+        loaderTimerRef.current = null;
+      }
+    };
+  }, [loading]);
+
   return (
     <div className="relative bg-gray-800 rounded-lg shadow-lg overflow-hidden">
       <div className="absolute top-3 left-3 z-20 flex items-center gap-2 bg-gray-900/70 px-2 py-1 rounded border border-gray-700">
@@ -710,7 +849,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           </span>
         )}
       </div>
-      {loading && (
+      {showLoader && (
         <div className="absolute inset-0 bg-gray-900/70 flex items-center justify-center z-10">
           <div className="flex items-center gap-3">
             <div className="spinner"></div>

@@ -10,8 +10,8 @@ const App = () => {
   const [timeRange, setTimeRange] = useState(null);
   const [currentRange, setCurrentRange] = useState(null);
   const [settings, setSettings] = useState({
-    maxPoints: 4000,
-    downsampleMethod: "lttb",
+    maxPoints: 10000,
+    downsampleMethod: "minmax",
   });
 
   const plotCounterRef = useRef(1);
