@@ -116,33 +116,22 @@ const Utils = (() => {
     return `"${timeColumn}"`;
   }
 
-  function buildDownsampleWithBandQuery(file, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+  function buildLttbQuery(file, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = maxPoints;
     const valueSelects = valueCols.map((c) => `"${c}"`).join(", ");
 
     let timeOrder;
     let timeAgg;
-    let timeOutput;
     if (isTimestamp) {
       timeOrder = `"${timeCol}"`;
       timeAgg = `EPOCH(MIN("${timeCol}")) as bucket_min_time`;
-      timeOutput = `bucket_min_time as "${timeCol}"`;
     } else {
       timeOrder = `"${timeCol}"`;
       timeAgg = `MIN("${timeCol}") as bucket_min_time`;
-      timeOutput = `bucket_min_time as "${timeCol}"`;
     }
 
-    const aggSelects = valueCols
-      .map(
-        (c) =>
-          `AVG("${c}") as avg_${c}, MIN("${c}") as min_${c}, MAX("${c}") as max_${c}`
-      )
-      .join(", ");
-
-    const finalSelects = valueCols
-      .map((c) => `avg_${c} as "${c}", min_${c} as "${c}_min", max_${c} as "${c}_max"`)
-      .join(", ");
+    const avgSelects = valueCols.map((c) => `AVG("${c}") as avg_${c}`).join(", ");
+    const finalSelects = valueCols.map((c) => `avg_${c} as "${c}"`).join(", ");
 
     return `
       WITH numbered AS (
@@ -164,15 +153,101 @@ const Utils = (() => {
         SELECT 
           bucket,
           ${timeAgg},
-          ${aggSelects}
+          ${avgSelects}
         FROM bucketed
         GROUP BY bucket
       )
       SELECT 
-        ${timeOutput},
+        bucket_min_time as "${timeCol}",
         ${finalSelects}
       FROM bucket_stats
       ORDER BY bucket
+    `;
+  }
+
+  function buildMinMaxQuery(file, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+    const numBuckets = Math.floor(maxPoints / 2);
+    const valueSelects = valueCols.map((c) => `"${c}"`).join(", ");
+
+    let timeOutput;
+    let timeOrder;
+    if (isTimestamp) {
+      timeOutput = `EPOCH("${timeCol}") as "${timeCol}"`;
+      timeOrder = `"${timeCol}"`;
+    } else {
+      timeOutput = `"${timeCol}"`;
+      timeOrder = `"${timeCol}"`;
+    }
+
+    return `
+      WITH numbered AS (
+        SELECT 
+          "${timeCol}",
+          ${valueSelects},
+          ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
+          COUNT(*) OVER () as total
+        FROM '${file}'
+        ${whereSql}
+      ),
+      bucketed AS (
+        SELECT 
+          *,
+          FLOOR((rn - 1) * ${numBuckets}::DOUBLE / NULLIF(total, 0)) as bucket
+        FROM numbered
+      ),
+      first_points AS (
+        SELECT 
+          bucket,
+          ${timeOutput},
+          ${valueSelects},
+          ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY "${timeCol}") as pos
+        FROM bucketed
+      )
+      SELECT "${timeCol}", ${valueSelects}
+      FROM first_points
+      WHERE pos = 1
+      ORDER BY "${timeCol}"
+    `;
+  }
+
+  function buildAvgQuery(file, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+    const numBuckets = maxPoints;
+    const valueSelects = valueCols.map((c) => `"${c}"`).join(", ");
+
+    let timeAgg;
+    let timeOrder;
+    if (isTimestamp) {
+      timeAgg = `EPOCH(MIN("${timeCol}")) as "${timeCol}"`;
+      timeOrder = `"${timeCol}"`;
+    } else {
+      timeAgg = `AVG("${timeCol}") as "${timeCol}"`;
+      timeOrder = `"${timeCol}"`;
+    }
+
+    const avgSelects = valueCols.map((c) => `AVG("${c}") as "${c}"`).join(", ");
+
+    return `
+      WITH numbered AS (
+        SELECT 
+          "${timeCol}",
+          ${valueSelects},
+          ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
+          COUNT(*) OVER () as total
+        FROM '${file}'
+        ${whereSql}
+      ),
+      bucketed AS (
+        SELECT 
+          *,
+          FLOOR((rn - 1) * ${numBuckets}::DOUBLE / NULLIF(total, 0)) as bucket
+        FROM numbered
+      )
+      SELECT 
+        ${timeAgg},
+        ${avgSelects}
+      FROM bucketed
+      GROUP BY bucket
+      ORDER BY "${timeCol}"
     `;
   }
 
@@ -221,7 +296,9 @@ const Utils = (() => {
     toEpoch,
     buildTimeFilter,
     getTimeSelectExpr,
-    buildDownsampleWithBandQuery,
+    buildLttbQuery,
+    buildMinMaxQuery,
+    buildAvgQuery,
     resultsToColumnar,
     COLORS,
   };
