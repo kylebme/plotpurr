@@ -374,6 +374,7 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const isZooming = useRef(false);
+  const [boxZoomEnabled, setBoxZoomEnabled] = useState(false);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -489,6 +490,22 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
           lineStyle: { color: "#1f2937" },
         },
       },
+      brush: boxZoomEnabled
+        ? {
+            toolbox: [],
+            xAxisIndex: 0,
+            brushMode: "single",
+            brushType: "rect",
+            transformable: false,
+            throttleType: "debounce",
+            throttleDelay: 100,
+            brushStyle: {
+              color: "rgba(59, 130, 246, 0.15)",
+              borderWidth: 1,
+              borderColor: "#3b82f6",
+            },
+          }
+        : { toolbox: [] },
       dataZoom: [
         {
           type: "inside",
@@ -520,6 +537,9 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
       ],
       series,
       color: COLORS,
+      toolbox: {
+        show: false,
+      },
     };
 
     isZooming.current = true;
@@ -529,21 +549,82 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
     chartInstance.current.off("datazoom");
     chartInstance.current.on(
       "datazoom",
-      debounce((params) => {
+      debounce(() => {
         if (isZooming.current) return;
-
-        const xAxis = chartInstance.current.getModel().getComponent("xAxis", 0);
-        const extent = xAxis.axis.scale.getExtent();
-
-        if (extent[0] !== undefined && extent[1] !== undefined) {
+        const model = chartInstance.current?.getModel();
+        if (!model) return;
+        const xAxis = model.getComponent("xAxis", 0);
+        const extent = xAxis?.axis?.scale?.getExtent?.() || [];
+        if (extent[0] !== undefined && extent[1] !== undefined && isFinite(extent[0]) && isFinite(extent[1])) {
           onZoom?.(extent[0], extent[1]);
         }
       }, 300)
     );
-  }, [seriesList, timeRange]);
+
+    chartInstance.current.off("brushEnd");
+    if (boxZoomEnabled) {
+      chartInstance.current.on("brushEnd", (params) => {
+        const area = params.areas?.[0];
+        const xRange = area?.coordRange?.[0];
+        const [start, end] = xRange || [];
+        if (!isFinite(start) || !isFinite(end) || start === end) return;
+        const min = Math.min(start, end);
+        const max = Math.max(start, end);
+        isZooming.current = true;
+        chartInstance.current?.dispatchAction({
+          type: "dataZoom",
+          dataZoomIndex: [0, 1],
+          startValue: min,
+          endValue: max,
+        });
+        isZooming.current = false;
+        onZoom?.(min, max);
+        chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
+        setBoxZoomEnabled(false);
+      });
+    }
+  }, [seriesList, timeRange, boxZoomEnabled, getColor, onZoom]);
+
+  useEffect(() => {
+    if (!chartInstance.current) return;
+    if (boxZoomEnabled) {
+      chartInstance.current.dispatchAction({
+        type: "takeGlobalCursor",
+        key: "brush",
+        brushOption: {
+          brushType: "rect",
+          brushMode: "single",
+        },
+      });
+    } else {
+      chartInstance.current.dispatchAction({
+        type: "takeGlobalCursor",
+        key: "brush",
+        brushOption: { brushType: false },
+      });
+      chartInstance.current.dispatchAction({ type: "brush", areas: [] });
+    }
+  }, [boxZoomEnabled]);
 
   return (
     <div className="relative bg-gray-800 rounded-lg shadow-lg overflow-hidden">
+      <div className="absolute top-3 left-3 z-20 flex items-center gap-2">
+        <button
+          onClick={() => setBoxZoomEnabled((v) => !v)}
+          className={`text-xs px-3 py-1 rounded border transition-colors ${
+            boxZoomEnabled
+              ? "bg-blue-600 text-white border-blue-500 shadow"
+            : "bg-gray-800 text-gray-200 border-gray-600 hover:bg-gray-700"
+          }`}
+        >
+          {boxZoomEnabled ? "Box Zoom On" : "Box Zoom"}
+        </button>
+        {boxZoomEnabled && (
+          <span className="text-[11px] text-blue-100 bg-blue-500/10 border border-blue-500/40 px-2 py-1 rounded">
+            Drag to select an area
+          </span>
+        )}
+      </div>
       {loading && (
         <div className="absolute inset-0 bg-gray-900/70 flex items-center justify-center z-10">
           <div className="flex items-center gap-3">
