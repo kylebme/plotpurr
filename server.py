@@ -41,8 +41,8 @@ class DuckDBRequestHandler(SimpleHTTPRequestHandler):
             logger.info("Initialising DuckDB in-memory database")
             cls.db = duckdb.connect(":memory:")
             # Basic performance tuning; adjust as needed
-            cls.db.execute("SET threads TO 4")
-            cls.db.execute("SET memory_limit = '2GB'")
+            cls.db.execute("SET threads TO 8")
+            cls.db.execute("SET memory_limit = '4GB'")
 
     def __init__(self, *args, **kwargs):
         # Ensure DB is initialised
