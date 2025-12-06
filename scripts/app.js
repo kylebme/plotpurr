@@ -11,7 +11,6 @@ const App = () => {
   const [currentRange, setCurrentRange] = useState(null);
   const [settings, setSettings] = useState({
     maxPoints: 10000,
-    downsampleMethod: "minmax",
   });
 
   const plotCounterRef = useRef(1);
@@ -155,16 +154,23 @@ const App = () => {
               start_time: currentRange.start,
               end_time: currentRange.end,
               max_points: settings.maxPoints,
-              downsample_method: settings.downsampleMethod,
               columnsMeta,
             });
             const timeData = result.data?.[series.timeColumn] || [];
             const valueData = result.data?.[series.column] || [];
+            const minData = result.data?.[`${series.column}_min`] || valueData;
+            const maxData = result.data?.[`${series.column}_max`] || valueData;
             const pairs = timeData.map((t, idx) => [t, valueData[idx]]);
+            const minPairs = timeData.map((t, idx) => [t, minData[idx]]);
+            const maxPairs = timeData.map((t, idx) => [t, maxData[idx]]);
             return {
               ...series,
               name: `${series.file} • ${series.column}`,
               data: pairs,
+              band: {
+                min: minPairs,
+                max: maxPairs,
+              },
               totalPoints: result.total_points,
               returnedPoints: result.returned_points,
               downsampled: result.downsampled,

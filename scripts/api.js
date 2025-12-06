@@ -4,10 +4,7 @@ const {
   toEpoch,
   buildTimeFilter,
   getTimeSelectExpr,
-  buildLttbQuery,
-  buildMinMaxQuery,
-  buildAvgQuery,
-  resultsToColumnar,
+  buildDownsampleWithBandQuery,
 } = window.Utils;
 
 const API_BASE = "";
@@ -145,16 +142,7 @@ const api = {
   },
 
   async queryData(params) {
-    const {
-      file,
-      time_column,
-      value_columns,
-      start_time,
-      end_time,
-      max_points,
-      downsample_method,
-      columnsMeta,
-    } = params;
+    const { file, time_column, value_columns, start_time, end_time, max_points, columnsMeta } = params;
 
     if (!file || !time_column || !value_columns?.length) {
       return {
@@ -195,40 +183,55 @@ const api = {
     const timeSelect = getTimeSelectExpr(time_column, isTs);
 
     let dataRows = [];
+    let columns = [];
     let downsampled = false;
-    const method = downsample_method || "lttb";
 
     if (totalPoints <= max_points) {
+      const selectCols = value_columns
+        .map((c) => `"${c}", "${c}" AS "${c}_min", "${c}" AS "${c}_max"`)
+        .join(", ");
       const query = `
-        SELECT ${timeSelect}, ${valueColsSql}
+        SELECT ${timeSelect}, ${selectCols}
         FROM '${file}'
         ${whereSql}
         ORDER BY "${time_column}"
       `;
       const res = await api.sql(query);
       dataRows = res.rows || [];
+      columns = res.columns || [];
     } else {
-      let query;
-      if (method === "minmax") {
-        query = buildMinMaxQuery(file, time_column, value_columns, whereSql, max_points, isTs);
-      } else if (method === "avg") {
-        query = buildAvgQuery(file, time_column, value_columns, whereSql, max_points, isTs);
-      } else {
-        query = buildLttbQuery(file, time_column, value_columns, whereSql, max_points, isTs);
-      }
+      const query = buildDownsampleWithBandQuery(file, time_column, value_columns, whereSql, max_points, isTs);
       const res = await api.sql(query);
       dataRows = res.rows || [];
+      columns = res.columns || [];
       downsampled = true;
     }
 
-    const data = resultsToColumnar(dataRows, time_column, value_columns);
+    // Convert rows to columnar data including band columns
+    const data = {};
+    const allColumns = columns && columns.length ? columns : [time_column, ...value_columns];
+    allColumns.forEach((c) => {
+      data[c] = [];
+    });
+    (dataRows || []).forEach((row) => {
+      allColumns.forEach((col, idx) => {
+        let val = row[idx];
+        if (val !== null && typeof val !== "number") {
+          const n = Number(val);
+          if (!Number.isNaN(n)) {
+            val = n;
+          }
+        }
+        if (data[col]) data[col].push(val);
+      });
+    });
 
     return {
       data,
       total_points: totalPoints,
       returned_points: dataRows.length,
       downsampled,
-      downsample_method: downsampled ? method : null,
+      downsample_method: downsampled ? "combined" : null,
     };
   },
 };

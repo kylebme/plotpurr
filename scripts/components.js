@@ -165,19 +165,6 @@ const QuerySettings = ({ settings, onChange }) => (
           className="w-full"
         />
       </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-2">Downsample Method</label>
-        <select
-          value={settings.downsampleMethod}
-          onChange={(e) => onChange({ ...settings, downsampleMethod: e.target.value })}
-          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="lttb">LTTB (Best Visual)</option>
-          <option value="minmax">Min/Max (Peak Preservation)</option>
-          <option value="avg">Average</option>
-        </select>
-      </div>
     </div>
   </div>
 );
@@ -417,26 +404,67 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
     xDomainRef.current = { min: domainStart, max: domainEnd };
 
-    const series = seriesList.map((s, idx) => ({
-      name: s.name || `${s.file} • ${s.column}`,
-      type: "line",
-      symbol: "none",
-      sampling: "lttb",
-      data: s.data || [],
-      lineStyle: {
-        width: 1.5,
-        color: getColor?.(s, idx),
-      },
-      emphasis: {
+    const series = [];
+    seriesList.forEach((s, idx) => {
+      const color = getColor?.(s, idx);
+      const bandMin = s.band?.min || [];
+      const bandMax = s.band?.max || [];
+      const bandDiff = bandMin.map((p, i) => {
+        const maxVal = bandMax[i]?.[1];
+        const minVal = p?.[1];
+        if (maxVal == null || minVal == null) return [p?.[0], null];
+        return [p[0], maxVal - minVal];
+      });
+
+      series.push({
+        name: s.name || `${s.file} • ${s.column}`,
+        type: "line",
+        symbol: "none",
+        sampling: "lttb",
+        data: s.data || [],
         lineStyle: {
-          width: 2,
-          color: getColor?.(s, idx),
+          width: 1.5,
+          color,
         },
-      },
-      itemStyle: {
-        color: getColor?.(s, idx),
-      },
-    }));
+        emphasis: {
+          lineStyle: {
+            width: 2,
+            color,
+          },
+        },
+        itemStyle: {
+          color,
+        },
+      });
+
+      if (bandMin.length && bandMax.length) {
+        const stackName = `band-${s.id}`;
+        series.push(
+          {
+            name: `${s.name}-band-base`,
+            type: "line",
+            data: bandMin,
+            stack: stackName,
+            symbol: "none",
+            lineStyle: { width: 0 },
+            areaStyle: { opacity: 0 },
+            tooltip: { show: false },
+            emphasis: { disabled: true },
+          },
+          {
+            name: `${s.name}-band`,
+            type: "line",
+            data: bandDiff,
+            stack: stackName,
+            symbol: "none",
+            lineStyle: { width: 0 },
+            areaStyle: { color: color ? `${color}66` : "rgba(59,130,246,0.4)", opacity: 0.4 },
+            tooltip: { show: false },
+            emphasis: { disabled: true },
+          }
+        );
+      }
+    });
 
     const option = {
       backgroundColor: "transparent",

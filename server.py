@@ -13,6 +13,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 import duckdb
+import webbrowser
 
 # Configuration
 HOST = "localhost"
@@ -168,6 +169,7 @@ def main():
     server_address = (HOST, PORT)
     httpd = HTTPServer(server_address, DuckDBRequestHandler)
     logger.info("Serving %s on http://%s:%d", PARQUET_DIR, HOST, PORT)
+    webbrowser.open(f"http://{HOST}:{PORT}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
