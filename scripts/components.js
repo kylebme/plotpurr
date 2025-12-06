@@ -236,6 +236,8 @@ const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) =
     if (!chartInstance.current || !data || !timeColumn) return;
 
     const timeData = data[timeColumn] || [];
+    const rangeStart = timeRange?.start ?? timeRange?.min;
+    const rangeEnd = timeRange?.end ?? timeRange?.max;
 
     const series = valueColumns.map((col, idx) => ({
       name: col,
@@ -295,8 +297,8 @@ const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) =
       },
       xAxis: {
         type: "value",
-        min: timeRange?.min,
-        max: timeRange?.max,
+        min: rangeStart,
+        max: rangeEnd,
         axisLabel: {
           formatter: (val) => {
             const date = new Date(val * 1000);
@@ -330,6 +332,8 @@ const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) =
           xAxisIndex: 0,
           filterMode: "none",
           throttle: 100,
+          startValue: rangeStart,
+          endValue: rangeEnd,
         },
         {
           type: "slider",
@@ -347,13 +351,17 @@ const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) =
             color: "#9ca3af",
           },
           brushSelect: false,
+          startValue: rangeStart,
+          endValue: rangeEnd,
         },
       ],
       series,
       color: COLORS,
     };
 
+    isZooming.current = true;
     chartInstance.current.setOption(option, true);
+    isZooming.current = false;
 
     chartInstance.current.off("datazoom");
     chartInstance.current.on(

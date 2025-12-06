@@ -1,4 +1,4 @@
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect, useCallback, useRef } = React;
 const { formatNumber } = window.Utils;
 const { Spinner, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, Chart } = window.Components;
 
@@ -20,6 +20,12 @@ const App = () => {
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingColumns, setLoadingColumns] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
+  const previousSelectionRef = useRef([]);
+  const selectedColumnsRef = useRef([]);
+
+  useEffect(() => {
+    selectedColumnsRef.current = selectedColumns;
+  }, [selectedColumns]);
 
   useEffect(() => {
     const loadFiles = async () => {
@@ -76,6 +82,9 @@ const App = () => {
     const loadRange = async () => {
       try {
         const range = await api.getTimeRange(selectedFile.name, timeColumn, timeColMeta.type);
+        if (selectedColumnsRef.current.length > 0) {
+          return;
+        }
         setTimeRange({
           min: range.min_epoch,
           max: range.max_epoch,
@@ -90,6 +99,57 @@ const App = () => {
     };
     loadRange();
   }, [selectedFile, timeColumn, columns]);
+
+  useEffect(() => {
+    if (!selectedFile || !timeColumn) {
+      previousSelectionRef.current = [];
+      return;
+    }
+
+    const prevSelected = previousSelectionRef.current;
+    previousSelectionRef.current = selectedColumns;
+
+    if (selectedColumns.length === 0) {
+      return;
+    }
+
+    const addedColumn = selectedColumns.find((col) => !prevSelected.includes(col));
+    if (!addedColumn) {
+      return;
+    }
+
+    const timeColMeta = columns.find((c) => c.name === timeColumn);
+    if (!timeColMeta) {
+      return;
+    }
+
+    const updateRangeForColumn = async () => {
+      try {
+        const range = await api.getTimeRange(selectedFile.name, timeColumn, timeColMeta.type, [addedColumn]);
+        if (range.min_epoch == null || range.max_epoch == null) {
+          return;
+        }
+
+        const nextRange = {
+          min: range.min_epoch,
+          max: range.max_epoch,
+        };
+
+        setTimeRange(nextRange);
+
+        if (prevSelected.length === 0) {
+          setCurrentRange({
+            start: nextRange.min,
+            end: nextRange.max,
+          });
+        }
+      } catch (err) {
+        console.error("Error loading time range for column:", addedColumn, err);
+      }
+    };
+
+    updateRangeForColumn();
+  }, [selectedColumns, selectedFile, timeColumn, columns]);
 
   const queryData = useCallback(
     async (startTime, endTime) => {

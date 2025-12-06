@@ -72,8 +72,12 @@ const api = {
     });
   },
 
-  async getTimeRange(file, timeColumn, columnType) {
+  async getTimeRange(file, timeColumn, columnType, valueColumns = []) {
     const isTs = isTimestampType(columnType);
+    const nonNullFilter =
+      valueColumns && valueColumns.length
+        ? `WHERE ${valueColumns.map((c) => `"${c}" IS NOT NULL`).join(" OR ")}`
+        : "";
     let query;
 
     if (isTs) {
@@ -85,6 +89,7 @@ const api = {
           EPOCH(MAX("${timeColumn}")) AS max_epoch,
           COUNT(*) AS total_count
         FROM '${file}'
+        ${nonNullFilter}
       `;
     } else {
       query = `
@@ -93,6 +98,7 @@ const api = {
           MAX("${timeColumn}") AS max_time,
           COUNT(*) AS total_count
         FROM '${file}'
+        ${nonNullFilter}
       `;
     }
 
