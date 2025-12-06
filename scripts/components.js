@@ -262,6 +262,7 @@ const PlotPanel = ({
   series,
   timeRange,
   onZoom,
+  resetToken,
   loading,
   onDropVariable,
   onRemoveSeries,
@@ -353,7 +354,14 @@ const PlotPanel = ({
         className="relative min-h-[360px]"
       >
         {series.length > 0 ? (
-          <Chart seriesList={series} onZoom={onZoom} loading={loading} timeRange={timeRange} getColor={getColor} />
+          <Chart
+            seriesList={series}
+            onZoom={onZoom}
+            loading={loading}
+            timeRange={timeRange}
+            getColor={getColor}
+            resetToken={resetToken}
+          />
         ) : (
           <div className="h-[360px] flex flex-col items-center justify-center text-gray-500 gap-2">
             <svg className="w-12 h-12 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -370,11 +378,12 @@ const PlotPanel = ({
   );
 };
 
-const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
+const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor, resetToken }) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const isZooming = useRef(false);
   const [boxZoomEnabled, setBoxZoomEnabled] = useState(false);
+  const [shiftDown, setShiftDown] = useState(false);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -494,6 +503,7 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
         ? {
             toolbox: [],
             xAxisIndex: 0,
+            yAxisIndex: 0,
             brushMode: "single",
             brushType: "rect",
             transformable: false,
@@ -508,14 +518,18 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
         : { toolbox: [] },
       dataZoom: [
         {
+          id: "x-inside",
           type: "inside",
           xAxisIndex: 0,
           filterMode: "none",
           throttle: 100,
           startValue: rangeStart,
           endValue: rangeEnd,
+          zoomOnMouseWheel: !shiftDown,
+          moveOnMouseWheel: !shiftDown,
         },
         {
+          id: "x-slider",
           type: "slider",
           xAxisIndex: 0,
           filterMode: "none",
@@ -534,6 +548,15 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
           startValue: rangeStart,
           endValue: rangeEnd,
         },
+        {
+          id: "y-inside",
+          type: "inside",
+          yAxisIndex: 0,
+          filterMode: "none",
+          throttle: 100,
+          zoomOnMouseWheel: shiftDown,
+          moveOnMouseWheel: false,
+        },
       ],
       series,
       color: COLORS,
@@ -543,7 +566,7 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
     };
 
     isZooming.current = true;
-    chartInstance.current.setOption(option, true);
+    chartInstance.current.setOption(option, { notMerge: false, replaceMerge: ["series"] });
     isZooming.current = false;
 
     chartInstance.current.off("datazoom");
@@ -566,24 +589,57 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
       chartInstance.current.on("brushEnd", (params) => {
         const area = params.areas?.[0];
         const xRange = area?.coordRange?.[0];
-        const [start, end] = xRange || [];
-        if (!isFinite(start) || !isFinite(end) || start === end) return;
-        const min = Math.min(start, end);
-        const max = Math.max(start, end);
+        const yRange = area?.coordRange?.[1];
+        const [xStart, xEnd] = xRange || [];
+        const [yStart, yEnd] = yRange || [];
+        if (!isFinite(xStart) || !isFinite(xEnd) || xStart === xEnd) return;
+        const minX = Math.min(xStart, xEnd);
+        const maxX = Math.max(xStart, xEnd);
+        const minY = isFinite(yStart) && isFinite(yEnd) ? Math.min(yStart, yEnd) : null;
+        const maxY = isFinite(yStart) && isFinite(yEnd) ? Math.max(yStart, yEnd) : null;
         isZooming.current = true;
         chartInstance.current?.dispatchAction({
           type: "dataZoom",
-          dataZoomIndex: [0, 1],
-          startValue: min,
-          endValue: max,
+          dataZoomId: "x-inside",
+          startValue: minX,
+          endValue: maxX,
         });
+        chartInstance.current?.dispatchAction({
+          type: "dataZoom",
+          dataZoomId: "x-slider",
+          startValue: minX,
+          endValue: maxX,
+        });
+        if (minY != null && maxY != null && minY !== maxY) {
+          chartInstance.current?.dispatchAction({
+            type: "dataZoom",
+            dataZoomId: "y-inside",
+            startValue: minY,
+            endValue: maxY,
+          });
+        }
         isZooming.current = false;
-        onZoom?.(min, max);
+        onZoom?.(minX, maxX);
         chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
         setBoxZoomEnabled(false);
       });
     }
-  }, [seriesList, timeRange, boxZoomEnabled, getColor, onZoom]);
+  }, [seriesList, timeRange, boxZoomEnabled, getColor, onZoom, shiftDown]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.shiftKey) setShiftDown(true);
+    };
+    const handleKeyUp = (e) => {
+      if (!e.shiftKey) setShiftDown(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
 
   useEffect(() => {
     if (!chartInstance.current) return;
@@ -605,6 +661,18 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
       chartInstance.current.dispatchAction({ type: "brush", areas: [] });
     }
   }, [boxZoomEnabled]);
+
+  useEffect(() => {
+    if (!chartInstance.current) return;
+    isZooming.current = true;
+    chartInstance.current.dispatchAction({
+      type: "dataZoom",
+      dataZoomId: "y-inside",
+      start: 0,
+      end: 100,
+    });
+    isZooming.current = false;
+  }, [resetToken]);
 
   return (
     <div className="relative bg-gray-800 rounded-lg shadow-lg overflow-hidden">

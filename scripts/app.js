@@ -23,6 +23,7 @@ const App = () => {
   const [plotData, setPlotData] = useState({});
   const [plotStats, setPlotStats] = useState({});
   const [plotLoading, setPlotLoading] = useState({});
+  const [resetToken, setResetToken] = useState(0);
 
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingColumns, setLoadingColumns] = useState(false);
@@ -422,6 +423,7 @@ const App = () => {
             series={seriesData}
             timeRange={currentRange || timeRange}
             onZoom={handleZoom}
+            resetToken={resetToken}
             loading={plotLoading[plot.id]}
             onDropVariable={(col, zone) => handleVariableDrop(plot.id, col, zone)}
             onRemoveSeries={(seriesId) => handleRemoveColumn(plot.id, seriesId)}
@@ -448,6 +450,7 @@ const App = () => {
         start: timeRange.min,
         end: timeRange.max,
       });
+      setResetToken((t) => t + 1);
     }
   };
 
