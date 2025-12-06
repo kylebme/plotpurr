@@ -384,7 +384,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const isZooming = useRef(false);
-  const [boxZoomEnabled, setBoxZoomEnabled] = useState(false);
+  const [interactionMode, setInteractionMode] = useState("box"); // "box" or "pan"
   const [shiftDown, setShiftDown] = useState(false);
 
   useEffect(() => {
@@ -503,7 +503,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           lineStyle: { color: "#1f2937" },
         },
       },
-      brush: boxZoomEnabled
+      brush: interactionMode === "box"
         ? {
             toolbox: [],
             xAxisIndex: 0,
@@ -531,6 +531,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           endValue: rangeEnd,
           zoomOnMouseWheel: !shiftDown,
           moveOnMouseWheel: !shiftDown,
+          moveOnMouseMove: interactionMode === "pan" && !shiftDown,
         },
         {
           id: "x-slider",
@@ -560,6 +561,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           throttle: 100,
           zoomOnMouseWheel: shiftDown,
           moveOnMouseWheel: false,
+          moveOnMouseMove: interactionMode === "pan" && shiftDown,
         },
       ],
       series,
@@ -589,7 +591,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     );
 
     chartInstance.current.off("brushEnd");
-    if (boxZoomEnabled) {
+    if (interactionMode === "box") {
       chartInstance.current.on("brushEnd", (params) => {
         const area = params.areas?.[0];
         const xRange = area?.coordRange?.[0];
@@ -625,10 +627,9 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         isZooming.current = false;
         onZoom?.(minX, maxX);
         chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
-        setBoxZoomEnabled(false);
       });
     }
-  }, [seriesList, viewRange, fullTimeRange, boxZoomEnabled, getColor, onZoom, shiftDown]);
+  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, onZoom, shiftDown]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -647,7 +648,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
 
   useEffect(() => {
     if (!chartInstance.current) return;
-    if (boxZoomEnabled) {
+    if (interactionMode === "box") {
       chartInstance.current.dispatchAction({
         type: "takeGlobalCursor",
         key: "brush",
@@ -664,7 +665,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
       });
       chartInstance.current.dispatchAction({ type: "brush", areas: [] });
     }
-  }, [boxZoomEnabled]);
+  }, [interactionMode]);
 
   useEffect(() => {
     if (!chartInstance.current) return;
@@ -680,18 +681,30 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
 
   return (
     <div className="relative bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-2">
+      <div className="absolute top-3 left-3 z-20 flex items-center gap-2 bg-gray-900/70 px-2 py-1 rounded border border-gray-700">
         <button
-          onClick={() => setBoxZoomEnabled((v) => !v)}
-          className={`text-xs px-3 py-1 rounded border transition-colors ${
-            boxZoomEnabled
+          onClick={() => setInteractionMode("box")}
+          className={`text-xs px-3 py-1 rounded border transition-colors flex items-center gap-1 ${
+            interactionMode === "box"
               ? "bg-blue-600 text-white border-blue-500 shadow"
-            : "bg-gray-800 text-gray-200 border-gray-600 hover:bg-gray-700"
+              : "bg-gray-800 text-gray-200 border-gray-600 hover:bg-gray-700"
           }`}
         >
-          {boxZoomEnabled ? "Box Zoom On" : "Box Zoom"}
+          <span>▭</span>
+          <span>Box</span>
         </button>
-        {boxZoomEnabled && (
+        <button
+          onClick={() => setInteractionMode("pan")}
+          className={`text-xs px-3 py-1 rounded border transition-colors flex items-center gap-1 ${
+            interactionMode === "pan"
+              ? "bg-blue-600 text-white border-blue-500 shadow"
+              : "bg-gray-800 text-gray-200 border-gray-600 hover:bg-gray-700"
+          }`}
+        >
+          <span>✋</span>
+          <span>Pan</span>
+        </button>
+        {interactionMode === "box" && (
           <span className="text-[11px] text-blue-100 bg-blue-500/10 border border-blue-500/40 px-2 py-1 rounded">
             Drag to select an area
           </span>
