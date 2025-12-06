@@ -1,5 +1,5 @@
 const { formatBytes, formatNumber, debounce, COLORS } = window.Utils;
-const { useEffect, useRef } = React;
+const { useEffect, useRef, useState } = React;
 
 const Spinner = () => (
   <div className="flex items-center justify-center p-4">
@@ -50,14 +50,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading }) => (
   </div>
 );
 
-const ColumnSelector = ({
-  columns,
-  timeColumn,
-  selectedColumns,
-  onTimeColumnChange,
-  onColumnToggle,
-  loading,
-}) => {
+const ColumnSelector = ({ columns, timeColumn, onTimeColumnChange, onColumnAdd, loading, activeColumns = [] }) => {
   const temporalColumns = columns.filter((c) => c.category === "temporal" || c.category === "numeric");
   const numericColumns = columns.filter((c) => c.category === "numeric");
 
@@ -98,27 +91,32 @@ const ColumnSelector = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Y-Axis Variables ({selectedColumns.length} selected)
-            </label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Y-Axis Variables</label>
+            <p className="text-xs text-gray-500 mb-2">Drag to a plot. Drop on edges to create split views.</p>
             <div className="max-h-64 overflow-y-auto space-y-1">
               {numericColumns.map((col, idx) => (
-                <label
+                <div
                   key={col.name}
-                  className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${
-                    selectedColumns.includes(col.name) ? "bg-gray-700" : "hover:bg-gray-700/50"
-                  }`}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", col.name);
+                    e.dataTransfer.effectAllowed = "copy";
+                  }}
+                  onDoubleClick={() => onColumnAdd?.(col.name)}
+                  className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-700/60 hover:bg-gray-700 border border-transparent hover:border-gray-600"
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedColumns.includes(col.name)}
-                    onChange={() => onColumnToggle(col.name)}
-                    className="w-4 h-4 rounded border-gray-500 text-blue-600 focus:ring-blue-500"
-                  />
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                  <span className="flex-1 truncate text-sm">{col.name}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-sm text-gray-100">{col.name}</div>
+                    <div className="text-xs text-gray-500">Drag to a plot or double-click to add</div>
+                  </div>
+                  {activeColumns.includes(col.name) && (
+                    <span className="text-[10px] text-blue-200 bg-blue-500/10 px-2 py-1 rounded-full border border-blue-500/30">
+                      Active
+                    </span>
+                  )}
                   <span className="text-xs text-gray-500">{col.type}</span>
-                </label>
+                </div>
               ))}
             </div>
           </div>
@@ -210,6 +208,147 @@ const StatsDisplay = ({ stats }) => (
     </div>
   </div>
 );
+
+function getDropZone(e, container) {
+  if (!container) return "center";
+  const rect = container.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const w = rect.width;
+  const h = rect.height;
+
+  const leftEdge = w * 0.25;
+  const rightEdge = w * 0.75;
+  const topEdge = h * 0.25;
+  const bottomEdge = h * 0.75;
+
+  if (x < leftEdge) return "left";
+  if (x > rightEdge) return "right";
+  if (y < topEdge) return "top";
+  if (y > bottomEdge) return "bottom";
+  return "center";
+}
+
+const DropOverlay = ({ zone }) => {
+  const base = "absolute bg-blue-500/10 border border-blue-400/50";
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      <div className="absolute inset-0 rounded-lg border-2 border-dashed border-blue-500/50" />
+      {zone === "center" && <div className={`${base} inset-[20%] rounded-lg`} />}
+      {zone === "left" && <div className={`${base} inset-y-[15%] left-[6%] right-[55%] rounded-l-lg`} />}
+      {zone === "right" && <div className={`${base} inset-y-[15%] right-[6%] left-[55%] rounded-r-lg`} />}
+      {zone === "top" && <div className={`${base} inset-x-[10%] top-[6%] bottom-[55%] rounded-t-lg`} />}
+      {zone === "bottom" && <div className={`${base} inset-x-[10%] bottom-[6%] top-[55%] rounded-b-lg`} />}
+      <div className="absolute bottom-3 right-3 bg-gray-900/70 text-xs text-blue-100 px-3 py-1 rounded-full shadow-lg border border-blue-500/40">
+        Drop to {zone === "center" ? "add to plot" : `split ${zone}`}
+      </div>
+    </div>
+  );
+};
+
+const PlotPanel = ({
+  title,
+  plotId,
+  valueColumns,
+  data,
+  timeColumn,
+  timeRange,
+  onZoom,
+  loading,
+  onDropVariable,
+  onRemoveColumn,
+  onRemovePlot,
+  canRemovePlot,
+}) => {
+  const dropRef = useRef(null);
+  const [dropZone, setDropZone] = useState(null);
+  const [dragging, setDragging] = useState(false);
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    const zone = getDropZone(e, dropRef.current);
+    setDragging(true);
+    setDropZone(zone);
+  };
+
+  const handleDragLeave = (e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setDragging(false);
+    setDropZone(null);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const col = e.dataTransfer.getData("text/plain");
+    const zone = getDropZone(e, dropRef.current) || dropZone || "center";
+    setDragging(false);
+    setDropZone(null);
+    if (col && onDropVariable) {
+      onDropVariable(col, zone);
+    }
+  };
+
+  return (
+    <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700/60 overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm text-gray-300">
+          <span className="px-2 py-1 rounded bg-gray-700/70 text-blue-200 font-semibold">{title}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {valueColumns.map((col) => (
+              <span
+                key={col}
+                className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-700 text-xs text-gray-100 border border-gray-600"
+              >
+                {col}
+                <button
+                  onClick={() => onRemoveColumn?.(col)}
+                  className="text-gray-400 hover:text-red-400 transition-colors"
+                  title="Remove variable"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {valueColumns.length === 0 && <span className="text-xs text-gray-500">Drop variables to plot</span>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {canRemovePlot && (
+            <button
+              onClick={onRemovePlot}
+              className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200"
+            >
+              Close plot
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div
+        ref={dropRef}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className="relative min-h-[360px]"
+      >
+        {valueColumns.length > 0 ? (
+          <Chart data={data} timeColumn={timeColumn} valueColumns={valueColumns} onZoom={onZoom} loading={loading} timeRange={timeRange} />
+        ) : (
+          <div className="h-[360px] flex flex-col items-center justify-center text-gray-500 gap-2">
+            <svg className="w-12 h-12 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4-4 4 4 6-6" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 16h-4m0 0v4m0-4v-4" />
+            </svg>
+            <div className="text-sm">Drag a variable here to start a chart</div>
+          </div>
+        )}
+
+        {dragging && <DropOverlay zone={dropZone || "center"} />}
+      </div>
+    </div>
+  );
+};
 
 const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) => {
   const chartRef = useRef(null);
@@ -389,9 +528,9 @@ const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) =
           </div>
         </div>
       )}
-      <div ref={chartRef} className="w-full h-[500px]"></div>
+      <div ref={chartRef} className="w-full h-[360px]"></div>
     </div>
   );
 };
 
-window.Components = { Spinner, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, Chart };
+window.Components = { Spinner, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, Chart, PlotPanel };
