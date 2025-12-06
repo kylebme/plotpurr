@@ -50,7 +50,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading }) => (
   </div>
 );
 
-const ColumnSelector = ({ columns, timeColumn, onTimeColumnChange, onColumnAdd, loading, activeColumns = [] }) => {
+const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColumnAdd, loading, activeColumns = [] }) => {
   const temporalColumns = columns.filter((c) => c.category === "temporal" || c.category === "numeric");
   const numericColumns = columns.filter((c) => c.category === "numeric");
 
@@ -70,10 +70,18 @@ const ColumnSelector = ({ columns, timeColumn, onTimeColumnChange, onColumnAdd, 
 
       {loading ? (
         <Spinner />
+      ) : !file ? (
+        <p className="text-gray-400 text-sm">Select a file to browse columns</p>
       ) : columns.length === 0 ? (
         <p className="text-gray-400 text-sm">Select a file first</p>
       ) : (
         <div className="space-y-4">
+          <div className="flex items-center justify-between text-xs text-gray-400 bg-gray-700/40 px-3 py-2 rounded border border-gray-700">
+            <span className="font-medium text-gray-200 truncate" title={file.name}>
+              {file.name}
+            </span>
+            <span className="text-gray-400">row count: {formatNumber(file.row_count || 0)}</span>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">X-Axis (Time Column)</label>
             <select
@@ -99,10 +107,12 @@ const ColumnSelector = ({ columns, timeColumn, onTimeColumnChange, onColumnAdd, 
                   key={col.name}
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", col.name);
+                    const payload = JSON.stringify({ column: col.name, file: file?.name });
+                    e.dataTransfer.setData("text/plain", payload);
+                    e.dataTransfer.setData("application/json", payload);
                     e.dataTransfer.effectAllowed = "copy";
                   }}
-                  onDoubleClick={() => onColumnAdd?.(col.name)}
+                  onDoubleClick={() => onColumnAdd?.({ column: col.name, file: file.name })}
                   className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-700/60 hover:bg-gray-700 border border-transparent hover:border-gray-600"
                 >
                   <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
@@ -249,16 +259,15 @@ const DropOverlay = ({ zone }) => {
 const PlotPanel = ({
   title,
   plotId,
-  valueColumns,
-  data,
-  timeColumn,
+  series,
   timeRange,
   onZoom,
   loading,
   onDropVariable,
-  onRemoveColumn,
+  onRemoveSeries,
   onRemovePlot,
   canRemovePlot,
+  getColor,
 }) => {
   const dropRef = useRef(null);
   const [dropZone, setDropZone] = useState(null);
@@ -280,12 +289,18 @@ const PlotPanel = ({
 
   const handleDrop = (e) => {
     e.preventDefault();
-    const col = e.dataTransfer.getData("text/plain");
+    const raw = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
+    let payload = null;
+    try {
+      payload = raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      payload = raw ? { column: raw } : null;
+    }
     const zone = getDropZone(e, dropRef.current) || dropZone || "center";
     setDragging(false);
     setDropZone(null);
-    if (col && onDropVariable) {
-      onDropVariable(col, zone);
+    if (payload && onDropVariable) {
+      onDropVariable(payload, zone);
     }
   };
 
@@ -295,14 +310,19 @@ const PlotPanel = ({
         <div className="flex items-center gap-2 text-sm text-gray-300">
           <span className="px-2 py-1 rounded bg-gray-700/70 text-blue-200 font-semibold">{title}</span>
           <div className="flex flex-wrap items-center gap-2">
-            {valueColumns.map((col) => (
+            {series.map((s) => (
               <span
-                key={col}
+                key={s.id}
                 className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-700 text-xs text-gray-100 border border-gray-600"
               >
-                {col}
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: getColor?.(s) }}
+                  title={s.file}
+                />
+                {s.file} • {s.column}
                 <button
-                  onClick={() => onRemoveColumn?.(col)}
+                  onClick={() => onRemoveSeries?.(s.id)}
                   className="text-gray-400 hover:text-red-400 transition-colors"
                   title="Remove variable"
                 >
@@ -310,7 +330,7 @@ const PlotPanel = ({
                 </button>
               </span>
             ))}
-            {valueColumns.length === 0 && <span className="text-xs text-gray-500">Drop variables to plot</span>}
+            {series.length === 0 && <span className="text-xs text-gray-500">Drop variables to plot</span>}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -332,8 +352,8 @@ const PlotPanel = ({
         onDrop={handleDrop}
         className="relative min-h-[360px]"
       >
-        {valueColumns.length > 0 ? (
-          <Chart data={data} timeColumn={timeColumn} valueColumns={valueColumns} onZoom={onZoom} loading={loading} timeRange={timeRange} />
+        {series.length > 0 ? (
+          <Chart seriesList={series} onZoom={onZoom} loading={loading} timeRange={timeRange} getColor={getColor} />
         ) : (
           <div className="h-[360px] flex flex-col items-center justify-center text-gray-500 gap-2">
             <svg className="w-12 h-12 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -350,7 +370,7 @@ const PlotPanel = ({
   );
 };
 
-const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) => {
+const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor }) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const isZooming = useRef(false);
@@ -372,25 +392,29 @@ const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) =
   }, []);
 
   useEffect(() => {
-    if (!chartInstance.current || !data || !timeColumn) return;
+    if (!chartInstance.current) return;
 
-    const timeData = data[timeColumn] || [];
     const rangeStart = timeRange?.start ?? timeRange?.min;
     const rangeEnd = timeRange?.end ?? timeRange?.max;
 
-    const series = valueColumns.map((col, idx) => ({
-      name: col,
+    const series = seriesList.map((s, idx) => ({
+      name: s.name || `${s.file} • ${s.column}`,
       type: "line",
       symbol: "none",
       sampling: "lttb",
-      data: (data[col] || []).map((val, i) => [timeData[i], val]),
+      data: s.data || [],
       lineStyle: {
         width: 1.5,
+        color: getColor?.(s, idx),
       },
       emphasis: {
         lineStyle: {
           width: 2,
+          color: getColor?.(s, idx),
         },
+      },
+      itemStyle: {
+        color: getColor?.(s, idx),
       },
     }));
 
@@ -516,7 +540,7 @@ const Chart = ({ data, timeColumn, valueColumns, onZoom, loading, timeRange }) =
         }
       }, 300)
     );
-  }, [data, timeColumn, valueColumns, timeRange]);
+  }, [seriesList, timeRange]);
 
   return (
     <div className="relative bg-gray-800 rounded-lg shadow-lg overflow-hidden">

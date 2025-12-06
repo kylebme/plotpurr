@@ -1,11 +1,12 @@
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
 const { FileSelector, ColumnSelector, QuerySettings, StatsDisplay, PlotPanel } = window.Components;
+const { COLORS } = window.Utils;
 
 const App = () => {
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [columns, setColumns] = useState([]);
-  const [timeColumn, setTimeColumn] = useState(null);
+  const [columnsByFile, setColumnsByFile] = useState({});
+  const [timeColumnsByFile, setTimeColumnsByFile] = useState({});
   const [timeRange, setTimeRange] = useState(null);
   const [currentRange, setCurrentRange] = useState(null);
   const [settings, setSettings] = useState({
@@ -14,8 +15,10 @@ const App = () => {
   });
 
   const plotCounterRef = useRef(1);
+  const seriesCounterRef = useRef(1);
+  const colorMapRef = useRef({});
   const initialPlotIdRef = useRef(`plot-${plotCounterRef.current++}`);
-  const [plots, setPlots] = useState([{ id: initialPlotIdRef.current, valueColumns: [] }]);
+  const [plots, setPlots] = useState([{ id: initialPlotIdRef.current, series: [] }]);
   const [layout, setLayout] = useState({ id: "layout-root", type: "plot", plotId: initialPlotIdRef.current });
   const [plotData, setPlotData] = useState({});
   const [plotStats, setPlotStats] = useState({});
@@ -24,28 +27,22 @@ const App = () => {
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingColumns, setLoadingColumns] = useState(false);
 
-  const previousSelectionRef = useRef([]);
-  const selectedColumnsRef = useRef([]);
+  const activeColumns = selectedFile ? columnsByFile[selectedFile.name] || [] : [];
+  const activeTimeColumn = selectedFile ? timeColumnsByFile[selectedFile.name] || "" : "";
 
-  const allPlotColumns = useMemo(
-    () => Array.from(new Set(plots.flatMap((p) => p.valueColumns))),
-    [plots]
-  );
-  const hasColumns = allPlotColumns.length > 0;
-
-  useEffect(() => {
-    selectedColumnsRef.current = allPlotColumns;
-  }, [allPlotColumns]);
-
-  const resetPlots = useCallback(() => {
-    const newPlotId = `plot-${plotCounterRef.current++}`;
-    setPlots([{ id: newPlotId, valueColumns: [] }]);
-    setLayout({ id: `layout-root-${newPlotId}`, type: "plot", plotId: newPlotId });
-    setPlotData({});
-    setPlotStats({});
-    setPlotLoading({});
-    return newPlotId;
-  }, []);
+  const allSeries = useMemo(() => plots.flatMap((p) => p.series), [plots]);
+  const activeColumnsForFile = useMemo(() => {
+    if (!selectedFile) return [];
+    const set = new Set();
+    plots.forEach((p) => {
+      p.series.forEach((s) => {
+        if (s.file === selectedFile.name) {
+          set.add(s.column);
+        }
+      });
+    });
+    return Array.from(set);
+  }, [plots, selectedFile]);
 
   useEffect(() => {
     const loadFiles = async () => {
@@ -61,126 +58,84 @@ const App = () => {
     loadFiles();
   }, []);
 
-  useEffect(() => {
-    if (!selectedFile) {
-      setColumns([]);
-      setTimeColumn(null);
-      resetPlots();
-      return;
-    }
-
-    const loadColumns = async () => {
+  const loadColumnsForFile = useCallback(
+    async (file) => {
+      if (!file) return;
+      if (columnsByFile[file.name]) {
+        setLoadingColumns(false);
+        return;
+      }
       setLoadingColumns(true);
       try {
-        const cols = await api.getColumns(selectedFile.name);
-        setColumns(cols);
-        resetPlots();
-
-        const temporalCol = cols.find((c) => c.category === "temporal");
-        const numericCol = cols.find((c) => c.category === "numeric");
-        if (temporalCol) {
-          setTimeColumn(temporalCol.name);
-        } else if (numericCol) {
-          setTimeColumn(numericCol.name);
-        } else {
-          setTimeColumn(null);
-        }
+        const cols = await api.getColumns(file.name);
+        setColumnsByFile((prev) => ({ ...prev, [file.name]: cols }));
+        setTimeColumnsByFile((prev) => {
+          if (prev[file.name]) return prev;
+          const temporalCol = cols.find((c) => c.category === "temporal");
+          const numericCol = cols.find((c) => c.category === "numeric");
+          return { ...prev, [file.name]: temporalCol?.name || numericCol?.name || "" };
+        });
       } catch (err) {
         console.error("Error loading columns:", err);
       }
       setLoadingColumns(false);
-    };
-    loadColumns();
-  }, [selectedFile, resetPlots]);
+    },
+    [columnsByFile]
+  );
 
   useEffect(() => {
-    if (!selectedFile || !timeColumn) {
+    if (!selectedFile) {
+      setLoadingColumns(false);
+      return;
+    }
+    loadColumnsForFile(selectedFile);
+  }, [selectedFile, loadColumnsForFile]);
+
+  useEffect(() => {
+    if (allSeries.length === 0) {
       setTimeRange(null);
       setCurrentRange(null);
-      return;
     }
+  }, [allSeries.length]);
 
-    const timeColMeta = columns.find((c) => c.name === timeColumn);
-    if (!timeColMeta) {
-      return;
+  const getSeriesColor = useCallback((series) => {
+    const key = `${series.file}::${series.column}`;
+    if (colorMapRef.current[key] === undefined) {
+      const nextIndex = Object.keys(colorMapRef.current).length % COLORS.length;
+      colorMapRef.current[key] = nextIndex;
     }
+    const idx = colorMapRef.current[key];
+    return COLORS[idx % COLORS.length];
+  }, []);
 
-    const loadRange = async () => {
+  const updateRangeForSeries = useCallback(
+    async (series) => {
+      const cols = columnsByFile[series.file];
+      if (!cols) return;
+      const timeColMeta = cols.find((c) => c.name === series.timeColumn);
+      if (!timeColMeta) return;
       try {
-        const range = await api.getTimeRange(selectedFile.name, timeColumn, timeColMeta.type);
-        if (selectedColumnsRef.current.length > 0) {
-          return;
-        }
-        setTimeRange({
-          min: range.min_epoch,
-          max: range.max_epoch,
+        const range = await api.getTimeRange(series.file, series.timeColumn, timeColMeta.type, [series.column]);
+        if (range.min_epoch == null || range.max_epoch == null) return;
+        const nextRange = { min: range.min_epoch, max: range.max_epoch };
+        setTimeRange((prev) => {
+          if (!prev) return nextRange;
+          return { min: Math.min(prev.min, nextRange.min), max: Math.max(prev.max, nextRange.max) };
         });
-        setCurrentRange({
-          start: range.min_epoch,
-          end: range.max_epoch,
+        setCurrentRange((prev) => {
+          if (!prev) return { start: nextRange.min, end: nextRange.max };
+          return { start: Math.min(prev.start, nextRange.min), end: Math.max(prev.end, nextRange.max) };
         });
       } catch (err) {
-        console.error("Error loading time range:", err);
+        console.error("Error loading time range for series", series, err);
       }
-    };
-    loadRange();
-  }, [selectedFile, timeColumn, columns]);
-
-  useEffect(() => {
-    if (!selectedFile || !timeColumn) {
-      previousSelectionRef.current = [];
-      return;
-    }
-
-    const prevSelected = previousSelectionRef.current;
-    previousSelectionRef.current = allPlotColumns;
-
-    if (allPlotColumns.length === 0) {
-      return;
-    }
-
-    const addedColumn = allPlotColumns.find((col) => !prevSelected.includes(col));
-    if (!addedColumn) {
-      return;
-    }
-
-    const timeColMeta = columns.find((c) => c.name === timeColumn);
-    if (!timeColMeta) {
-      return;
-    }
-
-    const updateRangeForColumn = async () => {
-      try {
-        const range = await api.getTimeRange(selectedFile.name, timeColumn, timeColMeta.type, [addedColumn]);
-        if (range.min_epoch == null || range.max_epoch == null) {
-          return;
-        }
-
-        const nextRange = {
-          min: range.min_epoch,
-          max: range.max_epoch,
-        };
-
-        setTimeRange(nextRange);
-
-        if (prevSelected.length === 0) {
-          setCurrentRange({
-            start: nextRange.min,
-            end: nextRange.max,
-          });
-        }
-      } catch (err) {
-        console.error("Error loading time range for column:", addedColumn, err);
-      }
-    };
-
-    updateRangeForColumn();
-  }, [allPlotColumns, selectedFile, timeColumn, columns]);
+    },
+    [columnsByFile]
+  );
 
   const fetchPlotData = useCallback(
     async (plot) => {
-      const hasTimeCol = columns.some((c) => c.name === timeColumn);
-      if (!selectedFile || !timeColumn || !hasTimeCol || !currentRange || plot.valueColumns.length === 0) {
+      if (!currentRange || !plot.series.length) {
         return;
       }
 
@@ -188,26 +143,44 @@ const App = () => {
       const queryStart = performance.now();
 
       try {
-        const result = await api.queryData({
-          file: selectedFile.name,
-          time_column: timeColumn,
-          value_columns: plot.valueColumns,
-          start_time: currentRange.start,
-          end_time: currentRange.end,
-          max_points: settings.maxPoints,
-          downsample_method: settings.downsampleMethod,
-          columnsMeta: columns,
-        });
+        const results = await Promise.all(
+          plot.series.map(async (series) => {
+            const columnsMeta = columnsByFile[series.file];
+            if (!columnsMeta) return null;
+            const result = await api.queryData({
+              file: series.file,
+              time_column: series.timeColumn,
+              value_columns: [series.column],
+              start_time: currentRange.start,
+              end_time: currentRange.end,
+              max_points: settings.maxPoints,
+              downsample_method: settings.downsampleMethod,
+              columnsMeta,
+            });
+            const timeData = result.data?.[series.timeColumn] || [];
+            const valueData = result.data?.[series.column] || [];
+            const pairs = timeData.map((t, idx) => [t, valueData[idx]]);
+            return {
+              ...series,
+              name: `${series.file} • ${series.column}`,
+              data: pairs,
+              totalPoints: result.total_points,
+              returnedPoints: result.returned_points,
+              downsampled: result.downsampled,
+            };
+          })
+        );
 
+        const filtered = results.filter(Boolean);
         const queryTime = Math.round(performance.now() - queryStart);
 
-        setPlotData((prev) => ({ ...prev, [plot.id]: result.data }));
+        setPlotData((prev) => ({ ...prev, [plot.id]: filtered }));
         setPlotStats((prev) => ({
           ...prev,
           [plot.id]: {
-            totalPoints: result.total_points,
-            returnedPoints: result.returned_points,
-            downsampled: result.downsampled,
+            totalPoints: filtered.reduce((sum, s) => sum + (s?.totalPoints || 0), 0),
+            returnedPoints: filtered.reduce((sum, s) => sum + (s?.returnedPoints || 0), 0),
+            downsampled: filtered.some((s) => s?.downsampled),
             queryTime,
           },
         }));
@@ -217,14 +190,14 @@ const App = () => {
         setPlotLoading((prev) => ({ ...prev, [plot.id]: false }));
       }
     },
-    [selectedFile, timeColumn, currentRange?.start, currentRange?.end, settings, columns]
+    [currentRange?.start, currentRange?.end, settings, columnsByFile]
   );
 
   useEffect(() => {
-    if (!currentRange || !selectedFile || !timeColumn) return;
+    if (!currentRange) return;
 
     plots.forEach((plot) => {
-      if (plot.valueColumns.length === 0) {
+      if (plot.series.length === 0) {
         setPlotData((prev) => {
           const next = { ...prev };
           delete next[plot.id];
@@ -239,23 +212,37 @@ const App = () => {
       }
       fetchPlotData(plot);
     });
-  }, [plots, currentRange?.start, currentRange?.end, settings, selectedFile, timeColumn, fetchPlotData]);
+  }, [plots, currentRange?.start, currentRange?.end, settings, fetchPlotData]);
 
   const handleZoom = useCallback((start, end) => {
     setCurrentRange({ start, end });
   }, []);
 
-  const addColumnToPlot = useCallback((plotId, columnName) => {
-    setPlots((prev) =>
-      prev.map((plot) =>
-        plot.id === plotId
-          ? plot.valueColumns.includes(columnName)
-            ? plot
-            : { ...plot, valueColumns: [...plot.valueColumns, columnName] }
-          : plot
-      )
-    );
-  }, []);
+  const addSeriesToPlot = useCallback(
+    (plotId, payload) => {
+      if (!payload?.file || !payload?.column) return;
+      const timeCol = timeColumnsByFile[payload.file];
+      if (!timeCol) return;
+      const newSeries = {
+        id: `series-${seriesCounterRef.current++}`,
+        file: payload.file,
+        column: payload.column,
+        timeColumn: timeCol,
+      };
+
+      setPlots((prev) =>
+        prev.map((plot) =>
+          plot.id === plotId
+            ? plot.series.some((s) => s.file === payload.file && s.column === payload.column && s.timeColumn === timeCol)
+              ? plot
+              : { ...plot, series: [...plot.series, newSeries] }
+            : plot
+        )
+      );
+      updateRangeForSeries(newSeries);
+    },
+    [timeColumnsByFile, updateRangeForSeries]
+  );
 
   const splitLayoutWithPlot = useCallback((node, targetPlotId, zone, newPlotId) => {
     if (!node) return { node: null, applied: false };
@@ -303,28 +290,40 @@ const App = () => {
   }, []);
 
   const handleVariableDrop = useCallback(
-    (plotId, columnName, zone) => {
-      if (!selectedFile || !timeColumn) return;
+    (plotId, payload, zone) => {
+      if (!payload?.file || !payload?.column) return;
+      const timeCol = timeColumnsByFile[payload.file];
+      if (!timeCol) return;
 
       if (zone === "center") {
-        addColumnToPlot(plotId, columnName);
+        addSeriesToPlot(plotId, payload);
         return;
       }
 
       const newPlotId = `plot-${plotCounterRef.current++}`;
-      setPlots((prev) => [...prev, { id: newPlotId, valueColumns: [columnName] }]);
+      const newSeriesId = `series-${seriesCounterRef.current++}`;
+      setPlots((prev) => [
+        ...prev,
+        { id: newPlotId, series: [{ id: newSeriesId, file: payload.file, column: payload.column, timeColumn: timeCol }] },
+      ]);
       setLayout((prev) => {
         const result = splitLayoutWithPlot(prev, plotId, zone, newPlotId);
         return result.applied && result.node ? result.node : prev;
       });
+      updateRangeForSeries({
+        id: newSeriesId,
+        file: payload.file,
+        column: payload.column,
+        timeColumn: timeCol,
+      });
     },
-    [addColumnToPlot, selectedFile, timeColumn, splitLayoutWithPlot]
+    [addSeriesToPlot, splitLayoutWithPlot, timeColumnsByFile, updateRangeForSeries]
   );
 
-  const handleRemoveColumn = useCallback((plotId, columnName) => {
+  const handleRemoveColumn = useCallback((plotId, seriesId) => {
     setPlots((prev) =>
       prev.map((plot) =>
-        plot.id === plotId ? { ...plot, valueColumns: plot.valueColumns.filter((c) => c !== columnName) } : plot
+        plot.id === plotId ? { ...plot, series: plot.series.filter((s) => s.id !== seriesId) } : plot
       )
     );
   }, []);
@@ -358,12 +357,33 @@ const App = () => {
   );
 
   const handleQuickAdd = useCallback(
-    (columnName) => {
+    (payload) => {
+      if (!payload?.file || !payload?.column) return;
       const target = plots[0];
       if (!target) return;
-      handleVariableDrop(target.id, columnName, "center");
+      handleVariableDrop(target.id, payload, "center");
     },
     [plots, handleVariableDrop]
+  );
+
+  const handleTimeColumnChange = useCallback(
+    (newTimeColumn) => {
+      if (!selectedFile) return;
+      const fileName = selectedFile.name;
+      setTimeColumnsByFile((prev) => ({ ...prev, [fileName]: newTimeColumn }));
+      setPlots((prev) =>
+        prev.map((plot) => ({
+          ...plot,
+          series: plot.series.map((s) => (s.file === fileName ? { ...s, timeColumn: newTimeColumn } : s)),
+        }))
+      );
+      plots.forEach((plot) => {
+        plot.series
+          .filter((s) => s.file === fileName)
+          .forEach((s) => updateRangeForSeries({ ...s, timeColumn: newTimeColumn }));
+      });
+    },
+    [selectedFile, plots, updateRangeForSeries]
   );
 
   const combinedStats = useMemo(() => {
@@ -390,21 +410,24 @@ const App = () => {
     if (node.type === "plot") {
       const plot = plots.find((p) => p.id === node.plotId);
       if (!plot) return null;
+      const seriesData =
+        plotData[plot.id] && plotData[plot.id].length
+          ? plotData[plot.id]
+          : plot.series.map((s) => ({ ...s, name: `${s.file} • ${s.column}`, data: [] }));
       return (
         <div key={node.id} className="flex-1 min-w-0">
           <PlotPanel
             title={plotTitleMap[plot.id] || "Plot"}
             plotId={plot.id}
-            valueColumns={plot.valueColumns}
-            data={plotData[plot.id] || {}}
-            timeColumn={timeColumn}
-            timeRange={currentRange}
+            series={seriesData}
+            timeRange={currentRange || timeRange}
             onZoom={handleZoom}
             loading={plotLoading[plot.id]}
             onDropVariable={(col, zone) => handleVariableDrop(plot.id, col, zone)}
-            onRemoveColumn={(col) => handleRemoveColumn(plot.id, col)}
+            onRemoveSeries={(seriesId) => handleRemoveColumn(plot.id, seriesId)}
             onRemovePlot={() => handleRemovePlot(plot.id)}
             canRemovePlot={plots.length > 1}
+            getColor={getSeriesColor}
           />
         </div>
       );
@@ -467,10 +490,11 @@ const App = () => {
             <FileSelector files={files} selectedFile={selectedFile} onSelect={setSelectedFile} loading={loadingFiles} />
 
             <ColumnSelector
-              columns={columns}
-              timeColumn={timeColumn}
-              onTimeColumnChange={setTimeColumn}
-              activeColumns={allPlotColumns}
+              file={selectedFile}
+              columns={activeColumns}
+              timeColumn={activeTimeColumn}
+              onTimeColumnChange={handleTimeColumnChange}
+              activeColumns={activeColumnsForFile}
               onColumnAdd={handleQuickAdd}
               loading={loadingColumns}
             />
@@ -481,7 +505,7 @@ const App = () => {
           </aside>
 
           <div className="col-span-9 space-y-4">
-            {selectedFile && timeColumn ? (
+            {selectedFile ? (
               renderLayout(layout)
             ) : (
               <div className="bg-gray-800 rounded-lg shadow-lg h-[420px] flex items-center justify-center">
@@ -491,13 +515,7 @@ const App = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
                   </svg>
                   <p className="text-lg font-medium mb-2">No Data to Display</p>
-                  <p className="text-sm">
-                    {!selectedFile
-                      ? "Select a parquet file to begin"
-                      : !timeColumn
-                      ? "Select a time column for the X-axis"
-                      : "Drag a variable onto the plot area to start"}
-                  </p>
+                  <p className="text-sm">Select a parquet file, then drag a variable onto the plot area to start</p>
                 </div>
               </div>
             )}
