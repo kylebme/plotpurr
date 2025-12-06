@@ -260,7 +260,8 @@ const PlotPanel = ({
   title,
   plotId,
   series,
-  timeRange,
+  viewRange,
+  fullTimeRange,
   onZoom,
   resetToken,
   loading,
@@ -358,7 +359,8 @@ const PlotPanel = ({
             seriesList={series}
             onZoom={onZoom}
             loading={loading}
-            timeRange={timeRange}
+            viewRange={viewRange}
+            fullTimeRange={fullTimeRange}
             getColor={getColor}
             resetToken={resetToken}
           />
@@ -378,7 +380,7 @@ const PlotPanel = ({
   );
 };
 
-const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor, resetToken }) => {
+const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, getColor, resetToken }) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const isZooming = useRef(false);
@@ -404,8 +406,10 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor, resetTok
   useEffect(() => {
     if (!chartInstance.current) return;
 
-    const rangeStart = timeRange?.start ?? timeRange?.min;
-    const rangeEnd = timeRange?.end ?? timeRange?.max;
+    const domainStart = fullTimeRange?.min ?? fullTimeRange?.start ?? viewRange?.min ?? viewRange?.start;
+    const domainEnd = fullTimeRange?.max ?? fullTimeRange?.end ?? viewRange?.max ?? viewRange?.end;
+    const rangeStart = viewRange?.start ?? viewRange?.min ?? domainStart;
+    const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
 
     const series = seriesList.map((s, idx) => ({
       name: s.name || `${s.file} • ${s.column}`,
@@ -470,8 +474,8 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor, resetTok
       },
       xAxis: {
         type: "value",
-        min: rangeStart,
-        max: rangeEnd,
+        min: domainStart,
+        max: domainEnd,
         axisLabel: {
           formatter: (val) => {
             const date = new Date(val * 1000);
@@ -624,7 +628,7 @@ const Chart = ({ seriesList = [], onZoom, loading, timeRange, getColor, resetTok
         setBoxZoomEnabled(false);
       });
     }
-  }, [seriesList, timeRange, boxZoomEnabled, getColor, onZoom, shiftDown]);
+  }, [seriesList, viewRange, fullTimeRange, boxZoomEnabled, getColor, onZoom, shiftDown]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {

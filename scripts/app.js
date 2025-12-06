@@ -421,7 +421,8 @@ const App = () => {
             title={plotTitleMap[plot.id] || "Plot"}
             plotId={plot.id}
             series={seriesData}
-            timeRange={currentRange || timeRange}
+            viewRange={currentRange || timeRange}
+            fullTimeRange={timeRange}
             onZoom={handleZoom}
             resetToken={resetToken}
             loading={plotLoading[plot.id]}
