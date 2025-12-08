@@ -388,6 +388,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   const [shiftDown, setShiftDown] = useState(false);
   const shiftDownRef = useRef(false);
   const xDomainRef = useRef({ min: null, max: null });
+  const yDomainRef = useRef({ min: null, max: null });
   const [showLoader, setShowLoader] = useState(false);
   const loaderTimerRef = useRef(null);
   const lastZoomRef = useRef({ start: null, end: null });
@@ -445,6 +446,25 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     const rangeStart = viewRange?.start ?? viewRange?.min ?? domainStart;
     const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
     xDomainRef.current = { min: domainStart, max: domainEnd };
+        // Compute vertical data domain from series
+    let yMin = Infinity;
+    let yMax = -Infinity;
+
+    seriesList.forEach((s) => {
+      (s.data || []).forEach((pt) => {
+        const v = Array.isArray(pt) ? pt[1] : null;
+        if (v == null || !isFinite(v)) return;
+        if (v < yMin) yMin = v;
+        if (v > yMax) yMax = v;
+      });
+    });
+
+    if (isFinite(yMin) && isFinite(yMax) && yMin !== Infinity && yMax !== -Infinity) {
+      yDomainRef.current = { min: yMin, max: yMax };
+    } else {
+      yDomainRef.current = { min: null, max: null };
+    }
+
 
     const series = seriesList.map((s, idx) => ({
       name: s.name || `${s.file} • ${s.column}`,
@@ -745,28 +765,55 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         const comp = model.getComponent(axis === "x" ? "xAxis" : "yAxis", 0);
         const extent = comp?.axis?.scale?.getExtent?.();
         if (!extent || extent.length < 2) return;
-        let [curMin, curMax] = extent;
-        if (!isFinite(curMin) || !isFinite(curMax) || curMin === curMax) return;
 
-        const anchor = isFinite(axis === "x" ? anchorX : anchorY)
-          ? axis === "x"
-            ? anchorX
-            : anchorY
-          : (curMin + curMax) / 2;
+        let [axisMin, axisMax] = extent;
+        if (!isFinite(axisMin) || !isFinite(axisMax) || axisMin === axisMax) return;
+
+        // Data domain for this axis
+        const domainRef = axis === "x" ? xDomainRef : yDomainRef;
+        let domainMin = domainRef.current.min;
+        let domainMax = domainRef.current.max;
+
+        if (!isFinite(domainMin) || !isFinite(domainMax)) {
+          domainMin = axisMin;
+          domainMax = axisMax;
+        }
+        if (domainMin > domainMax) {
+          const tmp = domainMin;
+          domainMin = domainMax;
+          domainMax = tmp;
+        }
+
+        const domainSpan = domainMax - domainMin;
+
+        // Current visible range = intersection of axis extent and data domain
+        let curMin = Math.max(axisMin, domainMin);
+        let curMax = Math.min(axisMax, domainMax);
+
+        if (!isFinite(curMin) || !isFinite(curMax) || curMin === curMax) {
+          curMin = axisMin;
+          curMax = axisMax;
+        }
+
+        const anchorCoord = axis === "x" ? anchorX : anchorY;
+        const anchor = isFinite(anchorCoord) ? anchorCoord : (curMin + curMax) / 2;
 
         const span = curMax - curMin;
         let newSpan = span * zoomFactor;
-        const minSpan = span / 1e6 || 1e-9;
+
+        // Prevent zooming in too far and zooming out beyond domain
+        const baseSpan = domainSpan > 0 ? domainSpan : span;
+        const minSpan = baseSpan / 1e6 || 1e-9;
         newSpan = Math.max(minSpan, newSpan);
+        if (domainSpan > 0) {
+          newSpan = Math.min(newSpan, domainSpan);
+        }
 
         let newMin = anchor - (anchor - curMin) * zoomFactor;
         let newMax = newMin + newSpan;
 
-        if (axis === "x") {
-          const domainMin = xDomainRef.current.min ?? curMin;
-          const domainMax = xDomainRef.current.max ?? curMax;
-          const maxSpan = domainMax - domainMin;
-          newSpan = Math.min(newSpan, maxSpan);
+        // Clamp into data domain if we have one
+        if (domainSpan > 0) {
           newMin = Math.max(domainMin, Math.min(newMin, domainMax - newSpan));
           newMax = newMin + newSpan;
         }
