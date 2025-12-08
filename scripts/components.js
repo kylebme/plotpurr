@@ -738,6 +738,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   useEffect(() => {
     if (!chartInstance.current) return;
     const zr = chartInstance.current.getZr();
+    if (!zr || !zr.handler) return;
 
     const handleWheel = (e) => {
       if (!chartInstance.current) return;
@@ -850,7 +851,9 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
 
     zr.on("mousewheel", handleWheel);
     return () => {
-      zr.off("mousewheel", handleWheel);
+      if (zr.handler) {
+        zr.off("mousewheel", handleWheel);
+      }
     };
   }, []);
 
