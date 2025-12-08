@@ -1,5 +1,5 @@
 const { formatBytes, formatNumber, debounce, COLORS } = window.Utils;
-const { useEffect, useRef, useState } = React;
+const { useEffect, useRef, useState, useCallback } = React;
 
 const Spinner = () => (
   <div className="flex items-center justify-center p-4">
@@ -388,9 +388,38 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   const [shiftDown, setShiftDown] = useState(false);
   const shiftDownRef = useRef(false);
   const xDomainRef = useRef({ min: null, max: null });
-  const wheelZoomTimeoutRef = useRef(null);
   const [showLoader, setShowLoader] = useState(false);
   const loaderTimerRef = useRef(null);
+  const lastZoomRef = useRef({ start: null, end: null });
+
+  const emitZoom = useCallback(
+    (start, end) => {
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+      const nextStart = Math.min(start, end);
+      const nextEnd = Math.max(start, end);
+      if (nextStart === nextEnd) return;
+
+      const tolerance = 1e-4; // avoid tiny floating changes firing twice
+      const { start: prevStart, end: prevEnd } = lastZoomRef.current || {};
+      if (prevStart != null && prevEnd != null) {
+        if (Math.abs(prevStart - nextStart) < tolerance && Math.abs(prevEnd - nextEnd) < tolerance) {
+          return;
+        }
+      }
+
+      lastZoomRef.current = { start: nextStart, end: nextEnd };
+      onZoom?.(nextStart, nextEnd);
+    },
+    [onZoom]
+  );
+
+  useEffect(() => {
+    if (!viewRange) return;
+    const start = viewRange.start ?? viewRange.min;
+    const end = viewRange.end ?? viewRange.max;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    lastZoomRef.current = { start, end };
+  }, [viewRange?.start, viewRange?.end, viewRange?.min, viewRange?.max]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -591,7 +620,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         const xAxis = model.getComponent("xAxis", 0);
         const extent = xAxis?.axis?.scale?.getExtent?.() || [];
         if (extent[0] !== undefined && extent[1] !== undefined && isFinite(extent[0]) && isFinite(extent[1])) {
-          onZoom?.(extent[0], extent[1]);
+          emitZoom(extent[0], extent[1]);
         }
       }, 300)
     );
@@ -609,7 +638,6 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         const maxX = Math.max(xStart, xEnd);
         const minY = isFinite(yStart) && isFinite(yEnd) ? Math.min(yStart, yEnd) : null;
         const maxY = isFinite(yStart) && isFinite(yEnd) ? Math.max(yStart, yEnd) : null;
-        isZooming.current = true;
         chartInstance.current?.dispatchAction({
           type: "dataZoom",
           dataZoomId: "x-inside",
@@ -630,12 +658,10 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
             endValue: maxY,
           });
         }
-        isZooming.current = false;
-        onZoom?.(minX, maxX);
         chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
       });
     }
-  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, onZoom, shiftDown]);
+  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -715,17 +741,6 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
       const model = chartInstance.current.getModel();
       if (!model) return;
 
-      const scheduleOnZoom = (min, max) => {
-        if (!onZoom) return;
-        if (wheelZoomTimeoutRef.current) {
-          clearTimeout(wheelZoomTimeoutRef.current);
-        }
-        wheelZoomTimeoutRef.current = setTimeout(() => {
-          wheelZoomTimeoutRef.current = null;
-          onZoom(min, max);
-        }, 200);
-      };
-
       const applyZoom = (axis) => {
         const comp = model.getComponent(axis === "x" ? "xAxis" : "yAxis", 0);
         const extent = comp?.axis?.scale?.getExtent?.();
@@ -756,7 +771,6 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           newMax = newMin + newSpan;
         }
 
-        isZooming.current = true;
         if (axis === "x") {
           chartInstance.current.dispatchAction({
             type: "dataZoom",
@@ -770,8 +784,6 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
             startValue: newMin,
             endValue: newMax,
           });
-          isZooming.current = false;
-          scheduleOnZoom(newMin, newMax);
         } else {
           chartInstance.current.dispatchAction({
             type: "dataZoom",
@@ -779,7 +791,6 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
             startValue: newMin,
             endValue: newMax,
           });
-          isZooming.current = false;
         }
       };
 
@@ -793,11 +804,8 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     zr.on("mousewheel", handleWheel);
     return () => {
       zr.off("mousewheel", handleWheel);
-      if (wheelZoomTimeoutRef.current) {
-        clearTimeout(wheelZoomTimeoutRef.current);
-      }
     };
-  }, [onZoom]);
+  }, []);
 
   useEffect(() => {
     if (loading) {

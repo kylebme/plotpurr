@@ -216,7 +216,18 @@ const App = () => {
   }, [plots, currentRange?.start, currentRange?.end, settings, fetchPlotData]);
 
   const handleZoom = useCallback((start, end) => {
-    setCurrentRange({ start, end });
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    const nextStart = Math.min(start, end);
+    const nextEnd = Math.max(start, end);
+    if (nextStart === nextEnd) return;
+
+    setCurrentRange((prev) => {
+      const tolerance = 1e-4;
+      if (prev && Math.abs(prev.start - nextStart) < tolerance && Math.abs(prev.end - nextEnd) < tolerance) {
+        return prev;
+      }
+      return { start: nextStart, end: nextEnd };
+    });
   }, []);
 
   const addSeriesToPlot = useCallback(
