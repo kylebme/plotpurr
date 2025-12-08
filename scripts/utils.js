@@ -117,51 +117,32 @@ const Utils = (() => {
   }
 
   function buildLttbQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
-    const numBuckets = maxPoints;
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
-
-    let timeOrder;
-    let timeAgg;
-    if (isTimestamp) {
-      timeOrder = `\`${timeCol}\``;
-      timeAgg = `toUnixTimestamp(min(\`${timeCol}\`)) as bucket_min_time`;
-    } else {
-      timeOrder = `\`${timeCol}\``;
-      timeAgg = `MIN(\`${timeCol}\`) as bucket_min_time`;
-    }
-
-    const avgSelects = valueCols.map((c) => `AVG(\`${c}\`) as avg_${c}`).join(", ");
-    const finalSelects = valueCols.map((c) => `avg_${c} as \`${c}\``).join(", ");
+    const timeOrderExpr = isTimestamp ? `toUnixTimestamp(\`${timeCol}\`)` : `toFloat64(\`${timeCol}\`)`;
+    const lttbValueCol = valueCols[0];
+    const lttbValueExpr = lttbValueCol ? `toFloat64OrZero(toString(\`${lttbValueCol}\`))` : "0";
 
     return `
-      WITH numbered AS (
-        SELECT 
-          \`${timeCol}\`,
+      WITH ordered AS (
+        SELECT
+          ${timeOrderExpr} AS t_order,
+          \`${timeCol}\` AS t_value,
           ${valueSelects},
-          ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
-          COUNT(*) OVER () as total
+          row_number() OVER (ORDER BY ${timeOrderExpr}) AS rn,
+          toFloat64(row_number() OVER (ORDER BY ${timeOrderExpr})) AS rn_f
         FROM ${source}
         ${whereSql}
       ),
-      bucketed AS (
-        SELECT 
-          *,
-          FLOOR((rn - 1) * CAST(${numBuckets} AS Float64) / NULLIF(total, 0)) as bucket
-        FROM numbered
-      ),
-      bucket_stats AS (
-        SELECT 
-          bucket,
-          ${timeAgg},
-          ${avgSelects}
-        FROM bucketed
-        GROUP BY bucket
+      sampled AS (
+        SELECT arrayJoin(lttb(${maxPoints})(rn_f, ${lttbValueExpr})) AS point
+        FROM ordered
       )
-      SELECT 
-        bucket_min_time as \`${timeCol}\`,
-        ${finalSelects}
-      FROM bucket_stats
-      ORDER BY bucket
+      SELECT
+        o.t_value AS \`${timeCol}\`,
+        ${valueCols.map((c) => `o.\`${c}\``).join(", ")}
+      FROM sampled s
+      JOIN ordered o ON o.rn = toUInt64(point.1)
+      ORDER BY o.t_value
     `;
   }
 
