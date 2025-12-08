@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Very thin DuckDB backend:
+Very thin ChDB (ClickHouse) backend:
 - Serves index.html and other static files from the current directory
 - Lists parquet files
 - Executes SQL provided by the frontend and returns (columns, rows)
@@ -12,7 +12,7 @@ import logging
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
-import duckdb
+import chdb
 import webbrowser
 
 # Configuration
@@ -25,7 +25,7 @@ logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(levelname)s - %(mes
 logger = logging.getLogger(__name__)
 
 
-class DuckDBRequestHandler(SimpleHTTPRequestHandler):
+class ChDBRequestHandler(SimpleHTTPRequestHandler):
     """
     HTTP handler that:
     - Serves static files (index.html, parquet, etc.)
@@ -33,21 +33,7 @@ class DuckDBRequestHandler(SimpleHTTPRequestHandler):
     - POST /api/sql  -> execute arbitrary SQL and return rows
     """
 
-    db = None  # shared DuckDB connection for all requests
-
-    @classmethod
-    def init_db(cls):
-        """Initialise the DuckDB connection once."""
-        if cls.db is None:
-            logger.info("Initialising DuckDB in-memory database")
-            cls.db = duckdb.connect(":memory:")
-            # Basic performance tuning; adjust as needed
-            cls.db.execute("SET threads TO 8")
-            cls.db.execute("SET memory_limit = '4GB'")
-
     def __init__(self, *args, **kwargs):
-        # Ensure DB is initialised
-        self.init_db()
         # Serve files from PARQUET_DIR
         super().__init__(*args, directory=str(PARQUET_DIR), **kwargs)
 
@@ -147,18 +133,38 @@ class DuckDBRequestHandler(SimpleHTTPRequestHandler):
             self._send_error(400, "Missing 'query' string in request body")
             return
 
+        if params:
+            # ChDB bindings currently do not accept positional parameters; ignore if present.
+            logger.warning("Query parameters were provided but are not supported with ChDB; ignoring.")
+
         try:
-            logger.debug("Executing SQL: %s", query[:500])
-            cur = self.db.execute(query, params)
+            prepared_query = str(query).strip()
+            logger.debug("Executing SQL: %s", prepared_query[:500])
+            raw = chdb.query(prepared_query, "JSON")
 
-            if cur.description is None:
-                # Non-SELECT statement
-                self._send_json({"columns": [], "rows": []})
-                return
+            # chdb returns a query_result with a .data() method that yields the output string.
+            data_attr = getattr(raw, "data", None)
+            if callable(data_attr):
+                result_str = data_attr()
+            elif isinstance(data_attr, str):
+                result_str = data_attr
+            else:
+                # Fallback to repr if an unexpected type is returned.
+                result_str = str(raw)
 
-            columns = [col[0] for col in cur.description]
-            rows = cur.fetchall()
+            parsed = json.loads(result_str or "{}")
 
+            meta = parsed.get("meta") or []
+            data = parsed.get("data") or []
+            columns = [col.get("name") for col in meta if isinstance(col, dict)]
+
+            rows = []
+            if columns and isinstance(data, list):
+                for row in data:
+                    if isinstance(row, dict):
+                        rows.append([row.get(col) for col in columns])
+                    else:
+                        rows.append(row)
             self._send_json({"columns": columns, "rows": rows})
         except Exception as exc:
             logger.exception("SQL execution failed")
@@ -167,7 +173,7 @@ class DuckDBRequestHandler(SimpleHTTPRequestHandler):
 
 def main():
     server_address = (HOST, PORT)
-    httpd = HTTPServer(server_address, DuckDBRequestHandler)
+    httpd = HTTPServer(server_address, ChDBRequestHandler)
     logger.info("Serving %s on http://%s:%d", PARQUET_DIR, HOST, PORT)
     webbrowser.open(f"http://{HOST}:{PORT}")
     try:

@@ -471,7 +471,7 @@ const App = () => {
               </svg>
               <div>
                 <h1 className="text-xl font-bold text-white">Parquet Viewer</h1>
-                <p className="text-xs text-gray-400">Powered by DuckDB</p>
+                <p className="text-xs text-gray-400">Powered by ChDB (ClickHouse)</p>
               </div>
             </div>
 

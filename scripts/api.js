@@ -11,13 +11,27 @@ const {
 } = window.Utils;
 
 const API_BASE = "";
+const fileTable = (file) => `file('${file}', 'Parquet')`;
+const needsFileSetting = (sql) => /\bfile\s*\(/i.test(sql);
+const hasSettingsClause = (sql) => /\bsettings\b/i.test(sql);
+const hasIntrospectionSetting = (sql) => /allow_introspection_functions\s*=\s*1/i.test(sql);
+
+const finalizeQuery = (sql) => {
+  const cleaned = (sql ?? "").toString().trim().replace(/;+$/, "");
+  if (!needsFileSetting(cleaned)) return cleaned;
+  if (hasIntrospectionSetting(cleaned)) return cleaned;
+  if (hasSettingsClause(cleaned)) return `${cleaned}, allow_introspection_functions=1`;
+  return `${cleaned} SETTINGS allow_introspection_functions=1`;
+};
 
 const api = {
   async sql(query, params = []) {
+    const finalQuery = finalizeQuery(query);
+
     const res = await fetch(`${API_BASE}/api/sql`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, params }),
+      body: JSON.stringify({ query: finalQuery, params }),
     });
 
     if (!res.ok) {
@@ -39,7 +53,8 @@ const api = {
     const filesWithCounts = await Promise.all(
       files.map(async (file) => {
         try {
-          const result = await api.sql(`SELECT COUNT(*) AS cnt FROM '${file.name}'`);
+          const tableExpr = fileTable(file.name);
+          const result = await api.sql(`SELECT COUNT(*) AS cnt FROM ${tableExpr}`);
           const colIndex = result.columns?.indexOf("cnt") ?? (result.columns?.length ? 0 : 0);
           const row = result.rows?.[0] || [0];
           const rowCount = colIndex >= 0 && row[colIndex] != null ? row[colIndex] : row[0];
@@ -56,10 +71,11 @@ const api = {
   },
 
   async getColumns(file) {
-    const result = await api.sql(`DESCRIBE SELECT * FROM '${file}'`);
+    const tableExpr = fileTable(file);
+    const result = await api.sql(`DESCRIBE TABLE ${tableExpr}`);
 
-    const nameIndex = result.columns?.indexOf("column_name") ?? 0;
-    const typeIndex = result.columns?.indexOf("column_type") ?? 1;
+    const nameIndex = result.columns?.indexOf("name") ?? 0;
+    const typeIndex = result.columns?.indexOf("type") ?? 1;
 
     return (result.rows || []).map((row) => {
       const name = row[nameIndex];
@@ -76,28 +92,29 @@ const api = {
     const isTs = isTimestampType(columnType);
     const nonNullFilter =
       valueColumns && valueColumns.length
-        ? `WHERE ${valueColumns.map((c) => `"${c}" IS NOT NULL`).join(" OR ")}`
+        ? `WHERE ${valueColumns.map((c) => `\`${c}\` IS NOT NULL`).join(" OR ")}`
         : "";
+    const tableExpr = fileTable(file);
     let query;
 
     if (isTs) {
       query = `
         SELECT 
-          MIN("${timeColumn}") AS min_time,
-          MAX("${timeColumn}") AS max_time,
-          EPOCH(MIN("${timeColumn}")) AS min_epoch,
-          EPOCH(MAX("${timeColumn}")) AS max_epoch,
+          MIN(\`${timeColumn}\`) AS min_time,
+          MAX(\`${timeColumn}\`) AS max_time,
+          toUnixTimestamp(MIN(\`${timeColumn}\`)) AS min_epoch,
+          toUnixTimestamp(MAX(\`${timeColumn}\`)) AS max_epoch,
           COUNT(*) AS total_count
-        FROM '${file}'
+        FROM ${tableExpr}
         ${nonNullFilter}
       `;
     } else {
       query = `
         SELECT 
-          MIN("${timeColumn}") AS min_time,
-          MAX("${timeColumn}") AS max_time,
+          MIN(\`${timeColumn}\`) AS min_time,
+          MAX(\`${timeColumn}\`) AS max_time,
           COUNT(*) AS total_count
-        FROM '${file}'
+        FROM ${tableExpr}
         ${nonNullFilter}
       `;
     }
@@ -179,10 +196,11 @@ const api = {
 
     const isTs = isTimestampType(colType);
     const whereSql = buildTimeFilter(time_column, start_time, end_time, isTs);
+    const tableExpr = fileTable(file);
 
     const countQuery = `
       SELECT COUNT(*) AS cnt 
-      FROM '${file}'
+      FROM ${tableExpr}
       ${whereSql}
     `;
     const countResult = await api.sql(countQuery);
@@ -191,7 +209,7 @@ const api = {
     const totalPoints =
       countIndex >= 0 && countRow[countIndex] != null ? countRow[countIndex] : countRow[0] || 0;
 
-    const valueColsSql = value_columns.map((c) => `"${c}"`).join(", ");
+    const valueColsSql = value_columns.map((c) => `\`${c}\``).join(", ");
     const timeSelect = getTimeSelectExpr(time_column, isTs);
 
     let dataRows = [];
@@ -201,20 +219,20 @@ const api = {
     if (totalPoints <= max_points) {
       const query = `
         SELECT ${timeSelect}, ${valueColsSql}
-        FROM '${file}'
+        FROM ${tableExpr}
         ${whereSql}
-        ORDER BY "${time_column}"
+        ORDER BY \`${time_column}\`
       `;
       const res = await api.sql(query);
       dataRows = res.rows || [];
     } else {
       let query;
       if (method === "minmax") {
-        query = buildMinMaxQuery(file, time_column, value_columns, whereSql, max_points, isTs);
+        query = buildMinMaxQuery(tableExpr, time_column, value_columns, whereSql, max_points, isTs);
       } else if (method === "avg") {
-        query = buildAvgQuery(file, time_column, value_columns, whereSql, max_points, isTs);
+        query = buildAvgQuery(tableExpr, time_column, value_columns, whereSql, max_points, isTs);
       } else {
-        query = buildLttbQuery(file, time_column, value_columns, whereSql, max_points, isTs);
+        query = buildLttbQuery(tableExpr, time_column, value_columns, whereSql, max_points, isTs);
       }
       const res = await api.sql(query);
       dataRows = res.rows || [];

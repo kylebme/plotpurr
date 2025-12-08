@@ -88,9 +88,9 @@ const Utils = (() => {
       const v = Number(startTime);
       if (Number.isFinite(v)) {
         if (isTimestamp) {
-          clauses.push(`"${timeColumn}" >= to_timestamp(${v})`);
+          clauses.push(`\`${timeColumn}\` >= toDateTime(${v})`);
         } else {
-          clauses.push(`"${timeColumn}" >= ${v}`);
+          clauses.push(`\`${timeColumn}\` >= ${v}`);
         }
       }
     }
@@ -99,9 +99,9 @@ const Utils = (() => {
       const v = Number(endTime);
       if (Number.isFinite(v)) {
         if (isTimestamp) {
-          clauses.push(`"${timeColumn}" <= to_timestamp(${v})`);
+          clauses.push(`\`${timeColumn}\` <= toDateTime(${v})`);
         } else {
-          clauses.push(`"${timeColumn}" <= ${v}`);
+          clauses.push(`\`${timeColumn}\` <= ${v}`);
         }
       }
     }
@@ -111,42 +111,42 @@ const Utils = (() => {
 
   function getTimeSelectExpr(timeColumn, isTimestamp) {
     if (isTimestamp) {
-      return `EPOCH("${timeColumn}") as "${timeColumn}"`;
+      return `toUnixTimestamp(\`${timeColumn}\`) as \`${timeColumn}\``;
     }
-    return `"${timeColumn}"`;
+    return `\`${timeColumn}\``;
   }
 
-  function buildLttbQuery(file, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+  function buildLttbQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = maxPoints;
-    const valueSelects = valueCols.map((c) => `"${c}"`).join(", ");
+    const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
 
     let timeOrder;
     let timeAgg;
     if (isTimestamp) {
-      timeOrder = `"${timeCol}"`;
-      timeAgg = `EPOCH(MIN("${timeCol}")) as bucket_min_time`;
+      timeOrder = `\`${timeCol}\``;
+      timeAgg = `toUnixTimestamp(min(\`${timeCol}\`)) as bucket_min_time`;
     } else {
-      timeOrder = `"${timeCol}"`;
-      timeAgg = `MIN("${timeCol}") as bucket_min_time`;
+      timeOrder = `\`${timeCol}\``;
+      timeAgg = `MIN(\`${timeCol}\`) as bucket_min_time`;
     }
 
-    const avgSelects = valueCols.map((c) => `AVG("${c}") as avg_${c}`).join(", ");
-    const finalSelects = valueCols.map((c) => `avg_${c} as "${c}"`).join(", ");
+    const avgSelects = valueCols.map((c) => `AVG(\`${c}\`) as avg_${c}`).join(", ");
+    const finalSelects = valueCols.map((c) => `avg_${c} as \`${c}\``).join(", ");
 
     return `
       WITH numbered AS (
         SELECT 
-          "${timeCol}",
+          \`${timeCol}\`,
           ${valueSelects},
           ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
           COUNT(*) OVER () as total
-        FROM '${file}'
+        FROM ${source}
         ${whereSql}
       ),
       bucketed AS (
         SELECT 
           *,
-          FLOOR((rn - 1) * ${numBuckets}::DOUBLE / NULLIF(total, 0)) as bucket
+          FLOOR((rn - 1) * CAST(${numBuckets} AS Float64) / NULLIF(total, 0)) as bucket
         FROM numbered
       ),
       bucket_stats AS (
@@ -158,41 +158,41 @@ const Utils = (() => {
         GROUP BY bucket
       )
       SELECT 
-        bucket_min_time as "${timeCol}",
+        bucket_min_time as \`${timeCol}\`,
         ${finalSelects}
       FROM bucket_stats
       ORDER BY bucket
     `;
   }
 
-  function buildMinMaxQuery(file, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+  function buildMinMaxQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = Math.floor(maxPoints / 2);
-    const valueSelects = valueCols.map((c) => `"${c}"`).join(", ");
+    const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
 
     let timeOutput;
     let timeOrder;
     if (isTimestamp) {
-      timeOutput = `EPOCH("${timeCol}") as "${timeCol}"`;
-      timeOrder = `"${timeCol}"`;
+      timeOutput = `toUnixTimestamp(\`${timeCol}\`) as \`${timeCol}\``;
+      timeOrder = `\`${timeCol}\``;
     } else {
-      timeOutput = `"${timeCol}"`;
-      timeOrder = `"${timeCol}"`;
+      timeOutput = `\`${timeCol}\``;
+      timeOrder = `\`${timeCol}\``;
     }
 
     return `
       WITH numbered AS (
         SELECT 
-          "${timeCol}",
+          \`${timeCol}\`,
           ${valueSelects},
           ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
           COUNT(*) OVER () as total
-        FROM '${file}'
+        FROM ${source}
         ${whereSql}
       ),
       bucketed AS (
         SELECT 
           *,
-          FLOOR((rn - 1) * ${numBuckets}::DOUBLE / NULLIF(total, 0)) as bucket
+          FLOOR((rn - 1) * CAST(${numBuckets} AS Float64) / NULLIF(total, 0)) as bucket
         FROM numbered
       ),
       first_points AS (
@@ -200,46 +200,46 @@ const Utils = (() => {
           bucket,
           ${timeOutput},
           ${valueSelects},
-          ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY "${timeCol}") as pos
+          ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${timeCol}\`) as pos
         FROM bucketed
       )
-      SELECT "${timeCol}", ${valueSelects}
+      SELECT \`${timeCol}\`, ${valueSelects}
       FROM first_points
       WHERE pos = 1
-      ORDER BY "${timeCol}"
+      ORDER BY \`${timeCol}\`
     `;
   }
 
-  function buildAvgQuery(file, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+  function buildAvgQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = maxPoints;
-    const valueSelects = valueCols.map((c) => `"${c}"`).join(", ");
+    const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
 
     let timeAgg;
     let timeOrder;
     if (isTimestamp) {
-      timeAgg = `EPOCH(MIN("${timeCol}")) as "${timeCol}"`;
-      timeOrder = `"${timeCol}"`;
+      timeAgg = `toUnixTimestamp(min(\`${timeCol}\`)) as \`${timeCol}\``;
+      timeOrder = `\`${timeCol}\``;
     } else {
-      timeAgg = `AVG("${timeCol}") as "${timeCol}"`;
-      timeOrder = `"${timeCol}"`;
+      timeAgg = `AVG(\`${timeCol}\`) as \`${timeCol}\``;
+      timeOrder = `\`${timeCol}\``;
     }
 
-    const avgSelects = valueCols.map((c) => `AVG("${c}") as "${c}"`).join(", ");
+    const avgSelects = valueCols.map((c) => `AVG(\`${c}\`) as \`${c}\``).join(", ");
 
     return `
       WITH numbered AS (
         SELECT 
-          "${timeCol}",
+          \`${timeCol}\`,
           ${valueSelects},
           ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
           COUNT(*) OVER () as total
-        FROM '${file}'
+        FROM ${source}
         ${whereSql}
       ),
       bucketed AS (
         SELECT 
           *,
-          FLOOR((rn - 1) * ${numBuckets}::DOUBLE / NULLIF(total, 0)) as bucket
+          FLOOR((rn - 1) * CAST(${numBuckets} AS Float64) / NULLIF(total, 0)) as bucket
         FROM numbered
       )
       SELECT 
@@ -247,7 +247,7 @@ const Utils = (() => {
         ${avgSelects}
       FROM bucketed
       GROUP BY bucket
-      ORDER BY "${timeCol}"
+      ORDER BY \`${timeCol}\`
     `;
   }
 
