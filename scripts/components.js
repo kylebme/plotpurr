@@ -51,8 +51,16 @@ const FileSelector = ({ files, selectedFile, onSelect, loading }) => (
 );
 
 const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColumnAdd, loading, activeColumns = [] }) => {
+  const [yFilter, setYFilter] = useState("");
   const temporalColumns = columns.filter((c) => c.category === "temporal" || c.category === "numeric");
   const numericColumns = columns.filter((c) => c.category === "numeric");
+  const filteredNumeric = yFilter
+    ? numericColumns.filter((c) => c.name.toLowerCase().includes(yFilter.toLowerCase()))
+    : numericColumns;
+
+  useEffect(() => {
+    setYFilter("");
+  }, [file?.name]);
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
@@ -99,35 +107,48 @@ const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColum
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Y-Axis Variables</label>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <label className="block text-sm font-medium text-gray-300">Y-Axis Variables</label>
+              <input
+                type="text"
+                value={yFilter}
+                onChange={(e) => setYFilter(e.target.value)}
+                placeholder="Filter"
+                className="w-40 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
             <p className="text-xs text-gray-500 mb-2">Drag to a plot. Drop on edges to create split views.</p>
             <div className="max-h-64 overflow-y-auto space-y-1">
-              {numericColumns.map((col, idx) => (
-                <div
-                  key={col.name}
-                  draggable
-                  onDragStart={(e) => {
-                    const payload = JSON.stringify({ column: col.name, file: file?.name });
-                    e.dataTransfer.setData("text/plain", payload);
-                    e.dataTransfer.setData("application/json", payload);
-                    e.dataTransfer.effectAllowed = "copy";
-                  }}
-                  onDoubleClick={() => onColumnAdd?.({ column: col.name, file: file.name })}
-                  className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-700/60 hover:bg-gray-700 border border-transparent hover:border-gray-600"
-                >
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="truncate text-sm text-gray-100">{col.name}</div>
-                    <div className="text-xs text-gray-500">Drag to a plot or double-click to add</div>
+              {filteredNumeric.length === 0 ? (
+                <div className="text-xs text-gray-500 px-2 py-3">No matching numeric columns</div>
+              ) : (
+                filteredNumeric.map((col, idx) => (
+                  <div
+                    key={col.name}
+                    draggable
+                    onDragStart={(e) => {
+                      const payload = JSON.stringify({ column: col.name, file: file?.name });
+                      e.dataTransfer.setData("text/plain", payload);
+                      e.dataTransfer.setData("application/json", payload);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onDoubleClick={() => onColumnAdd?.({ column: col.name, file: file.name })}
+                    className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-700/60 hover:bg-gray-700 border border-transparent hover:border-gray-600"
+                  >
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate text-sm text-gray-100">{col.name}</div>
+                      <div className="text-xs text-gray-500">Drag to a plot or double-click to add</div>
+                    </div>
+                    {activeColumns.includes(col.name) && (
+                      <span className="text-[10px] text-blue-200 bg-blue-500/10 px-2 py-1 rounded-full border border-blue-500/30">
+                        Active
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-500">{col.type}</span>
                   </div>
-                  {activeColumns.includes(col.name) && (
-                    <span className="text-[10px] text-blue-200 bg-blue-500/10 px-2 py-1 rounded-full border border-blue-500/30">
-                      Active
-                    </span>
-                  )}
-                  <span className="text-xs text-gray-500">{col.type}</span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
