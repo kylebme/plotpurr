@@ -136,51 +136,77 @@ const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColum
   );
 };
 
-const QuerySettings = ({ settings, onChange }) => (
-  <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
-    <h2 className="text-lg font-semibold mb-3 text-blue-400 flex items-center gap-2">
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
-        />
-      </svg>
-      Settings
-    </h2>
+const QuerySettings = ({ settings, onChange }) => {
+  const tooltipEnabled = settings.showTooltip !== false;
 
-    <div className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-2">
-          Max Points: {formatNumber(settings.maxPoints)}
-        </label>
-        <input
-          type="range"
-          min="1000"
-          max="20000"
-          step="500"
-          value={settings.maxPoints}
-          onChange={(e) => onChange({ ...settings, maxPoints: parseInt(e.target.value) })}
-          className="w-full"
-        />
-      </div>
+  return (
+    <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
+      <h2 className="text-lg font-semibold mb-3 text-blue-400 flex items-center gap-2">
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+          />
+        </svg>
+        Settings
+      </h2>
 
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-2">Downsample Method</label>
-        <select
-          value={settings.downsampleMethod}
-          onChange={(e) => onChange({ ...settings, downsampleMethod: e.target.value })}
-          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="lttb">LTTB (Best Visual)</option>
-          <option value="minmax">Min/Max (Peak Preservation)</option>
-          <option value="avg">Average</option>
-        </select>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Max Points: {formatNumber(settings.maxPoints)}
+          </label>
+          <input
+            type="range"
+            min="1000"
+            max="20000"
+            step="500"
+            value={settings.maxPoints}
+            onChange={(e) => onChange({ ...settings, maxPoints: parseInt(e.target.value) })}
+            className="w-full"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Downsample Method</label>
+          <select
+            value={settings.downsampleMethod}
+            onChange={(e) => onChange({ ...settings, downsampleMethod: e.target.value })}
+            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="lttb">LTTB (Best Visual)</option>
+            <option value="minmax">Min/Max (Peak Preservation)</option>
+            <option value="avg">Average</option>
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between bg-gray-700/40 border border-gray-700 rounded-lg px-3 py-2">
+          <div>
+            <label className="block text-sm font-medium text-gray-300">Cursor / Tooltip</label>
+            <p className="text-xs text-gray-500">Show hover line and tooltip on every plot.</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={tooltipEnabled}
+            onClick={() => onChange({ ...settings, showTooltip: !tooltipEnabled })}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              tooltipEnabled ? "bg-blue-500" : "bg-gray-600"
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                tooltipEnabled ? "translate-x-5" : "translate-x-1"
+              }`}
+            ></span>
+          </button>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const StatsDisplay = ({ stats }) => (
   <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
@@ -270,6 +296,7 @@ const PlotPanel = ({
   onRemovePlot,
   canRemovePlot,
   getColor,
+  showTooltip,
 }) => {
   const dropRef = useRef(null);
   const [dropZone, setDropZone] = useState(null);
@@ -363,6 +390,7 @@ const PlotPanel = ({
             fullTimeRange={fullTimeRange}
             getColor={getColor}
             resetToken={resetToken}
+            showTooltip={showTooltip}
           />
         ) : (
           <div className="h-[360px] flex flex-col items-center justify-center text-gray-500 gap-2">
@@ -380,7 +408,16 @@ const PlotPanel = ({
   );
 };
 
-const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, getColor, resetToken }) => {
+const Chart = ({
+  seriesList = [],
+  onZoom,
+  loading,
+  viewRange,
+  fullTimeRange,
+  getColor,
+  resetToken,
+  showTooltip = true,
+}) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const isZooming = useRef(false);
@@ -446,7 +483,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     const rangeStart = viewRange?.start ?? viewRange?.min ?? domainStart;
     const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
     xDomainRef.current = { min: domainStart, max: domainEnd };
-        // Compute vertical data domain from series
+    // Compute vertical data domain from series
     let yMin = Infinity;
     let yMax = -Infinity;
 
@@ -491,30 +528,35 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
       },
     }));
 
-    const option = {
-      backgroundColor: "transparent",
-      animation: false,
-      tooltip: {
-        trigger: "axis",
-        backgroundColor: "rgba(30, 41, 59, 0.95)",
-        borderColor: "#475569",
-        textStyle: {
-          color: "#e2e8f0",
-        },
-        formatter: (params) => {
-          if (!params.length) return "";
-          const time = new Date(params[0].value[0] * 1000).toISOString();
-          let html = `<div class="font-semibold mb-2">${time}</div>`;
-          params.forEach((p) => {
-            const value = p.value[1]?.toFixed(6) ?? "N/A";
-            html += `<div class="flex justify-between gap-4">
+    const tooltip = showTooltip
+      ? {
+          show: true,
+          trigger: "axis",
+          backgroundColor: "rgba(30, 41, 59, 0.95)",
+          borderColor: "#475569",
+          textStyle: {
+            color: "#e2e8f0",
+          },
+          formatter: (params) => {
+            if (!params.length) return "";
+            const time = new Date(params[0].value[0] * 1000).toISOString();
+            let html = `<div class="font-semibold mb-2">${time}</div>`;
+            params.forEach((p) => {
+              const value = p.value[1]?.toFixed(6) ?? "N/A";
+              html += `<div class="flex justify-between gap-4">
                           <span>${p.marker} ${p.seriesName}</span>
                           <span class="font-mono">${value}</span>
                       </div>`;
-          });
-          return html;
-        },
-      },
+            });
+            return html;
+          },
+        }
+      : { show: false, trigger: "none", axisPointer: { show: false } };
+
+    const option = {
+      backgroundColor: "transparent",
+      animation: false,
+      tooltip,
       legend: {
         type: "scroll",
         top: 10,
@@ -687,7 +729,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
       });
     }
-  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown]);
+  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {

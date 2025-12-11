@@ -12,6 +12,7 @@ const App = () => {
   const [settings, setSettings] = useState({
     maxPoints: 10000,
     downsampleMethod: "minmax",
+    showTooltip: true,
   });
 
   const plotCounterRef = useRef(1);
@@ -191,7 +192,7 @@ const App = () => {
         setPlotLoading((prev) => ({ ...prev, [plot.id]: false }));
       }
     },
-    [currentRange?.start, currentRange?.end, settings, columnsByFile]
+    [currentRange?.start, currentRange?.end, settings.maxPoints, settings.downsampleMethod, columnsByFile]
   );
 
   useEffect(() => {
@@ -213,7 +214,7 @@ const App = () => {
       }
       fetchPlotData(plot);
     });
-  }, [plots, currentRange?.start, currentRange?.end, settings, fetchPlotData]);
+  }, [plots, currentRange?.start, currentRange?.end, fetchPlotData]);
 
   const handleZoom = useCallback((start, end) => {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return;
@@ -442,6 +443,7 @@ const App = () => {
             onRemovePlot={() => handleRemovePlot(plot.id)}
             canRemovePlot={plots.length > 1}
             getColor={getSeriesColor}
+            showTooltip={settings.showTooltip !== false}
           />
         </div>
       );
