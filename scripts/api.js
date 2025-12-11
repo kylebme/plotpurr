@@ -70,6 +70,21 @@ const api = {
     return filesWithCounts;
   },
 
+  async setPaths(paths) {
+    const res = await fetch(`${API_BASE}/api/set_paths`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Failed to set paths: ${text || res.statusText}`);
+    }
+
+    return res.json();
+  },
+
   async getColumns(file) {
     const tableExpr = fileTable(file);
     const result = await api.sql(`DESCRIBE TABLE ${tableExpr}`);

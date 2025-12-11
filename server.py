@@ -9,6 +9,7 @@ All query logic and SQL text live in the frontend.
 
 import json
 import logging
+import os
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -23,6 +24,8 @@ LOG_LEVEL = logging.INFO
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+SELECTED_PATHS = []
 
 
 class ChDBRequestHandler(SimpleHTTPRequestHandler):
@@ -87,15 +90,38 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
         if path == "/api/sql":
             self._handle_sql()
             return
+        if path == "/api/set_paths":
+            self._handle_set_paths()
+            return
 
         self._send_error(404, "Endpoint not found")
 
     # ---------- Endpoint handlers ----------
 
-    def _handle_list_files(self):
-        """Return basic info about all .parquet files in PARQUET_DIR."""
+    def _collect_parquet_files(self):
+        """Return a list of Path objects for configured parquet files."""
+        paths = SELECTED_PATHS or [str(p) for p in PARQUET_DIR.glob("*.parquet")]
+
         files = []
-        for f in PARQUET_DIR.glob("*.parquet"):
+        seen = set()
+        for raw in paths:
+            p = Path(raw).expanduser().resolve()
+            if p in seen:
+                continue
+            if p.is_dir():
+                for child in sorted(p.glob("*.parquet")):
+                    if child not in seen:
+                        files.append(child)
+                        seen.add(child)
+            elif p.is_file() and p.suffix.lower() == ".parquet":
+                files.append(p)
+                seen.add(p)
+        return files
+
+    def _handle_list_files(self):
+        """Return basic info about parquet files from the selected paths or default directory."""
+        files = []
+        for f in self._collect_parquet_files():
             try:
                 stat = f.stat()
                 files.append(
@@ -110,6 +136,42 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
                 logger.warning("Error reading file %s: %s", f, exc)
 
         self._send_json({"files": files})
+
+    def _handle_set_paths(self):
+        """Configure which parquet files/directories should be exposed."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_error(400, "Invalid Content-Length")
+            return
+
+        try:
+            raw = self.rfile.read(length)
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self._send_error(400, "Invalid JSON")
+            return
+
+        paths = payload.get("paths")
+        if paths is None:
+            self._send_error(400, "Missing 'paths' array")
+            return
+
+        if not isinstance(paths, list):
+            self._send_error(400, "'paths' must be an array")
+            return
+
+        normalized = []
+        for p in paths:
+            try:
+                normalized.append(str(Path(p).expanduser().resolve()))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to normalize path %s: %s", p, exc)
+
+        global SELECTED_PATHS
+        SELECTED_PATHS = normalized
+        logger.info("Updated parquet search paths: %s", SELECTED_PATHS)
+        self._send_json({"ok": True, "count": len(SELECTED_PATHS)})
 
     def _handle_sql(self):
         """Execute arbitrary SQL and return columns + rows as JSON."""
@@ -175,7 +237,8 @@ def main():
     server_address = (HOST, PORT)
     httpd = HTTPServer(server_address, ChDBRequestHandler)
     logger.info("Serving %s on http://%s:%d", PARQUET_DIR, HOST, PORT)
-    webbrowser.open(f"http://{HOST}:{PORT}")
+    if not os.environ.get("NO_BROWSER"):
+        webbrowser.open(f"http://{HOST}:{PORT}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

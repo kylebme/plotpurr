@@ -7,40 +7,56 @@ const Spinner = () => (
   </div>
 );
 
-const FileSelector = ({ files, selectedFile, onSelect, loading }) => (
+const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
   <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
-    <h2 className="text-lg font-semibold mb-3 text-blue-400 flex items-center gap-2">
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-        />
-      </svg>
-      Parquet Files
-    </h2>
+    <div className="flex items-center justify-between gap-2 mb-3">
+      <h2 className="text-lg font-semibold text-blue-400 flex items-center gap-2">
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+          />
+        </svg>
+        Parquet Files
+      </h2>
+
+      {onBrowse && (
+        <button
+          onClick={onBrowse}
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-md transition-colors"
+        >
+          Choose…
+        </button>
+      )}
+    </div>
 
     {loading ? (
       <Spinner />
     ) : (
       <div className="space-y-2 max-h-60 overflow-y-auto">
         {files.length === 0 ? (
-          <p className="text-gray-400 text-sm">No parquet files found</p>
+          <p className="text-gray-400 text-sm">
+            {onBrowse ? "No parquet files selected yet" : "No parquet files found"}
+          </p>
         ) : (
           files.map((file) => (
             <button
-              key={file.name}
+              key={file.id || file.path || file.name}
               onClick={() => onSelect(file)}
               className={`w-full text-left p-3 rounded-lg transition-all ${
-                selectedFile?.name === file.name
+                selectedFile?.id === file.id || selectedFile?.path === file.path || selectedFile?.name === file.name
                   ? "bg-blue-600 text-white"
                   : "bg-gray-700 hover:bg-gray-600 text-gray-200"
               }`}
             >
-              <div className="font-medium truncate">{file.name}</div>
-              <div className="text-xs opacity-75 mt-1">
-                {formatBytes(file.size_bytes)} • {formatNumber(file.row_count)} rows
+              <div className="font-medium truncate" title={file.path || file.name}>
+                {file.name}
+              </div>
+              <div className="text-xs opacity-75 mt-1 space-y-0.5">
+                <div>{formatBytes(file.size_bytes)} • {formatNumber(file.row_count)} rows</div>
+                {file.path && <div className="text-[11px] text-gray-300 truncate">{file.path}</div>}
               </div>
             </button>
           ))
@@ -52,6 +68,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading }) => (
 
 const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColumnAdd, loading, activeColumns = [] }) => {
   const [yFilter, setYFilter] = useState("");
+  const fileKey = file?.id || file?.path || file?.name;
   const temporalColumns = columns.filter((c) => c.category === "temporal" || c.category === "numeric");
   const numericColumns = columns.filter((c) => c.category === "numeric");
   const filteredNumeric = yFilter
@@ -127,12 +144,12 @@ const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColum
                     key={col.name}
                     draggable
                     onDragStart={(e) => {
-                      const payload = JSON.stringify({ column: col.name, file: file?.name });
+                      const payload = JSON.stringify({ column: col.name, file: fileKey, fileName: file?.name });
                       e.dataTransfer.setData("text/plain", payload);
                       e.dataTransfer.setData("application/json", payload);
                       e.dataTransfer.effectAllowed = "copy";
                     }}
-                    onDoubleClick={() => onColumnAdd?.({ column: col.name, file: file.name })}
+                    onDoubleClick={() => onColumnAdd?.({ column: col.name, file: fileKey, fileName: file?.name })}
                     className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-700/60 hover:bg-gray-700 border border-transparent hover:border-gray-600"
                   >
                     <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />

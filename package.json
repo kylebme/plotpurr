@@ -1,0 +1,13 @@
+{
+  "name": "plotter-electron",
+  "version": "0.1.0",
+  "description": "Desktop wrapper for the Parquet viewer powered by ChDB.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}

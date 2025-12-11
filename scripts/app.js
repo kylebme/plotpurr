@@ -2,6 +2,12 @@ const { useState, useEffect, useCallback, useRef, useMemo } = React;
 const { FileSelector, ColumnSelector, QuerySettings, StatsDisplay, PlotPanel } = window.Components;
 const { COLORS } = window.Utils;
 
+const getFileKey = (file) => {
+  if (!file) return "";
+  if (typeof file === "string") return file;
+  return file.id || file.path || file.name || "";
+};
+
 const App = () => {
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -28,54 +34,101 @@ const App = () => {
 
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingColumns, setLoadingColumns] = useState(false);
+  const canBrowse = !!window.electronAPI?.selectParquetPaths;
 
-  const activeColumns = selectedFile ? columnsByFile[selectedFile.name] || [] : [];
-  const activeTimeColumn = selectedFile ? timeColumnsByFile[selectedFile.name] || "" : "";
+  const selectedFileKey = getFileKey(selectedFile);
+  const activeColumns = selectedFileKey ? columnsByFile[selectedFileKey] || [] : [];
+  const activeTimeColumn = selectedFileKey ? timeColumnsByFile[selectedFileKey] || "" : "";
 
   const allSeries = useMemo(() => plots.flatMap((p) => p.series), [plots]);
   const activeColumnsForFile = useMemo(() => {
-    if (!selectedFile) return [];
+    if (!selectedFileKey) return [];
     const set = new Set();
     plots.forEach((p) => {
       p.series.forEach((s) => {
-        if (s.file === selectedFile.name) {
+        if (s.file === selectedFileKey) {
           set.add(s.column);
         }
       });
     });
     return Array.from(set);
-  }, [plots, selectedFile]);
+  }, [plots, selectedFileKey]);
+
+  const resetPlotsState = useCallback(() => {
+    const newPlotId = `plot-${plotCounterRef.current++}`;
+    setPlots([{ id: newPlotId, series: [] }]);
+    setLayout({ id: "layout-root", type: "plot", plotId: newPlotId });
+    setPlotData({});
+    setPlotStats({});
+    setPlotLoading({});
+    setTimeRange(null);
+    setCurrentRange(null);
+    setSelectedFile(null);
+    setColumnsByFile({});
+    setTimeColumnsByFile({});
+    setResetToken((t) => t + 1);
+  }, []);
+
+  const loadFiles = useCallback(async () => {
+    setLoadingFiles(true);
+    try {
+      const fetched = await api.getFiles();
+      const normalized = (fetched || []).map((f) => ({
+        ...f,
+        id: f.path || f.name,
+      }));
+      setFiles(normalized);
+    } catch (err) {
+      console.error("Error loading files:", err);
+    }
+    setLoadingFiles(false);
+  }, []);
+
+  const handleBrowseForParquet = useCallback(async () => {
+    const selector = window.electronAPI?.selectParquetPaths;
+    if (!selector) {
+      console.warn("Browse requires the Electron shell.");
+      return;
+    }
+    const paths = await selector();
+    if (!paths || !paths.length) return;
+
+    setLoadingFiles(true);
+    resetPlotsState();
+    try {
+      await api.setPaths(paths);
+      await loadFiles();
+    } catch (err) {
+      console.error("Error applying selected paths:", err);
+    }
+    setLoadingFiles(false);
+  }, [loadFiles, resetPlotsState]);
 
   useEffect(() => {
-    const loadFiles = async () => {
-      setLoadingFiles(true);
-      try {
-        const files = await api.getFiles();
-        setFiles(files);
-      } catch (err) {
-        console.error("Error loading files:", err);
-      }
+    if (canBrowse) {
       setLoadingFiles(false);
-    };
+      return;
+    }
     loadFiles();
-  }, []);
+  }, [canBrowse, loadFiles]);
 
   const loadColumnsForFile = useCallback(
     async (file) => {
       if (!file) return;
-      if (columnsByFile[file.name]) {
+      const fileKey = getFileKey(file);
+      if (columnsByFile[fileKey]) {
         setLoadingColumns(false);
         return;
       }
       setLoadingColumns(true);
       try {
-        const cols = await api.getColumns(file.name);
-        setColumnsByFile((prev) => ({ ...prev, [file.name]: cols }));
+        const cols = await api.getColumns(fileKey);
+        setColumnsByFile((prev) => ({ ...prev, [fileKey]: cols }));
         setTimeColumnsByFile((prev) => {
-          if (prev[file.name]) return prev;
+          if (prev[fileKey]) return prev;
           const temporalCol = cols.find((c) => c.category === "temporal");
           const numericCol = cols.find((c) => c.category === "numeric");
-          return { ...prev, [file.name]: temporalCol?.name || numericCol?.name || "" };
+          return { ...prev, [fileKey]: temporalCol?.name || numericCol?.name || "" };
         });
       } catch (err) {
         console.error("Error loading columns:", err);
@@ -164,7 +217,7 @@ const App = () => {
             const pairs = timeData.map((t, idx) => [t, valueData[idx]]);
             return {
               ...series,
-              name: `${series.file} • ${series.column}`,
+              name: `${series.fileName || series.file} • ${series.column}`,
               data: pairs,
               totalPoints: result.total_points,
               returnedPoints: result.returned_points,
@@ -239,6 +292,7 @@ const App = () => {
       const newSeries = {
         id: `series-${seriesCounterRef.current++}`,
         file: payload.file,
+        fileName: payload.fileName,
         column: payload.column,
         timeColumn: timeCol,
       };
@@ -317,7 +371,18 @@ const App = () => {
       const newSeriesId = `series-${seriesCounterRef.current++}`;
       setPlots((prev) => [
         ...prev,
-        { id: newPlotId, series: [{ id: newSeriesId, file: payload.file, column: payload.column, timeColumn: timeCol }] },
+        {
+          id: newPlotId,
+          series: [
+            {
+              id: newSeriesId,
+              file: payload.file,
+              fileName: payload.fileName,
+              column: payload.column,
+              timeColumn: timeCol,
+            },
+          ],
+        },
       ]);
       setLayout((prev) => {
         const result = splitLayoutWithPlot(prev, plotId, zone, newPlotId);
@@ -326,6 +391,7 @@ const App = () => {
       updateRangeForSeries({
         id: newSeriesId,
         file: payload.file,
+        fileName: payload.fileName,
         column: payload.column,
         timeColumn: timeCol,
       });
@@ -382,17 +448,17 @@ const App = () => {
   const handleTimeColumnChange = useCallback(
     (newTimeColumn) => {
       if (!selectedFile) return;
-      const fileName = selectedFile.name;
-      setTimeColumnsByFile((prev) => ({ ...prev, [fileName]: newTimeColumn }));
+      const fileKey = getFileKey(selectedFile);
+      setTimeColumnsByFile((prev) => ({ ...prev, [fileKey]: newTimeColumn }));
       setPlots((prev) =>
         prev.map((plot) => ({
           ...plot,
-          series: plot.series.map((s) => (s.file === fileName ? { ...s, timeColumn: newTimeColumn } : s)),
+          series: plot.series.map((s) => (s.file === fileKey ? { ...s, timeColumn: newTimeColumn } : s)),
         }))
       );
       plots.forEach((plot) => {
         plot.series
-          .filter((s) => s.file === fileName)
+          .filter((s) => s.file === fileKey)
           .forEach((s) => updateRangeForSeries({ ...s, timeColumn: newTimeColumn }));
       });
     },
@@ -426,7 +492,11 @@ const App = () => {
       const seriesData =
         plotData[plot.id] && plotData[plot.id].length
           ? plotData[plot.id]
-          : plot.series.map((s) => ({ ...s, name: `${s.file} • ${s.column}`, data: [] }));
+          : plot.series.map((s) => ({
+              ...s,
+              name: `${s.fileName || s.file} • ${s.column}`,
+              data: [],
+            }));
       return (
         <div key={node.id} className="flex-1 min-w-0">
           <PlotPanel
@@ -504,7 +574,13 @@ const App = () => {
       <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 py-6">
         <div className="grid grid-cols-12 gap-6">
           <aside className="col-span-3 space-y-6">
-            <FileSelector files={files} selectedFile={selectedFile} onSelect={setSelectedFile} loading={loadingFiles} />
+            <FileSelector
+              files={files}
+              selectedFile={selectedFile}
+              onSelect={setSelectedFile}
+              loading={loadingFiles}
+              onBrowse={canBrowse ? handleBrowseForParquet : null}
+            />
 
             <ColumnSelector
               file={selectedFile}
