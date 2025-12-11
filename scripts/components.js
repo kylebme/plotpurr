@@ -459,7 +459,11 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
       });
     });
 
+    let yAxisMin = null;
+    let yAxisMax = null;
     if (isFinite(yMin) && isFinite(yMax) && yMin !== Infinity && yMax !== -Infinity) {
+      yAxisMin = yMin;
+      yAxisMax = yMax;
       yDomainRef.current = { min: yMin, max: yMax };
     } else {
       yDomainRef.current = { min: null, max: null };
@@ -547,6 +551,8 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
       },
       yAxis: {
         type: "value",
+        min: isFinite(yAxisMin) ? yAxisMin : undefined,
+        max: isFinite(yAxisMax) ? yAxisMax : undefined,
         axisLabel: {
           color: "#9ca3af",
           formatter: (val) => val.toPrecision(4),
