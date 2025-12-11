@@ -1,5 +1,5 @@
-const { formatBytes, formatNumber, debounce, COLORS } = window.Utils;
-const { useEffect, useRef, useState, useCallback } = React;
+const { formatBytes, formatNumber, debounce, toUPlotData, COLORS } = window.Utils;
+const { useEffect, useRef, useState, useMemo } = React;
 
 const Spinner = () => (
   <div className="flex items-center justify-center p-4">
@@ -381,294 +381,62 @@ const PlotPanel = ({
 };
 
 const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, getColor, resetToken }) => {
-  const chartRef = useRef(null);
-  const chartInstance = useRef(null);
-  const isZooming = useRef(false);
-  const [interactionMode, setInteractionMode] = useState("box"); // "box" or "pan"
-  const [shiftDown, setShiftDown] = useState(false);
-  const shiftDownRef = useRef(false);
-  const xDomainRef = useRef({ min: null, max: null });
+  const containerRef = useRef(null);
+  const uplotRef = useRef(null);
+  const tooltipRef = useRef(null);
+  const [interactionMode, setInteractionMode] = useState("box");
   const [showLoader, setShowLoader] = useState(false);
   const loaderTimerRef = useRef(null);
   const lastZoomRef = useRef({ start: null, end: null });
+  const isUpdatingScale = useRef(false);
+  const shiftDownRef = useRef(false);
+  const xDomainRef = useRef({ min: null, max: null });
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, scaleMin: 0, scaleMax: 0 });
 
-  const emitZoom = useCallback(
-    (start, end) => {
-      if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-      const nextStart = Math.min(start, end);
-      const nextEnd = Math.max(start, end);
-      if (nextStart === nextEnd) return;
+  // Debounced zoom callback
+  const debouncedZoom = useMemo(
+    () =>
+      debounce((start, end) => {
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+        const nextStart = Math.min(start, end);
+        const nextEnd = Math.max(start, end);
+        if (nextStart === nextEnd) return;
 
-      const tolerance = 1e-4; // avoid tiny floating changes firing twice
-      const { start: prevStart, end: prevEnd } = lastZoomRef.current || {};
-      if (prevStart != null && prevEnd != null) {
-        if (Math.abs(prevStart - nextStart) < tolerance && Math.abs(prevEnd - nextEnd) < tolerance) {
-          return;
+        const tolerance = 1e-4;
+        const { start: prevStart, end: prevEnd } = lastZoomRef.current || {};
+        if (prevStart != null && prevEnd != null) {
+          if (Math.abs(prevStart - nextStart) < tolerance && Math.abs(prevEnd - nextEnd) < tolerance) {
+            return;
+          }
         }
-      }
 
-      lastZoomRef.current = { start: nextStart, end: nextEnd };
-      onZoom?.(nextStart, nextEnd);
-    },
+        lastZoomRef.current = { start: nextStart, end: nextEnd };
+        onZoom?.(nextStart, nextEnd);
+      }, 300),
     [onZoom]
   );
 
-  useEffect(() => {
-    if (!viewRange) return;
-    const start = viewRange.start ?? viewRange.min;
-    const end = viewRange.end ?? viewRange.max;
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-    lastZoomRef.current = { start, end };
-  }, [viewRange?.start, viewRange?.end, viewRange?.min, viewRange?.max]);
+  // Convert series data to uPlot format
+  const uplotData = useMemo(() => toUPlotData(seriesList), [seriesList]);
+
+  // Compute domain bounds
+  const domainStart = fullTimeRange?.min ?? fullTimeRange?.start ?? viewRange?.min ?? viewRange?.start;
+  const domainEnd = fullTimeRange?.max ?? fullTimeRange?.end ?? viewRange?.max ?? viewRange?.end;
+  const rangeStart = viewRange?.start ?? viewRange?.min ?? domainStart;
+  const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
 
   useEffect(() => {
-    if (!chartRef.current) return;
-
-    chartInstance.current = echarts.init(chartRef.current, "dark");
-
-    const resizeObserver = new ResizeObserver(() => {
-      chartInstance.current?.resize();
-    });
-    resizeObserver.observe(chartRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-      chartInstance.current?.dispose();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!chartInstance.current) return;
-
-    const domainStart = fullTimeRange?.min ?? fullTimeRange?.start ?? viewRange?.min ?? viewRange?.start;
-    const domainEnd = fullTimeRange?.max ?? fullTimeRange?.end ?? viewRange?.max ?? viewRange?.end;
-    const rangeStart = viewRange?.start ?? viewRange?.min ?? domainStart;
-    const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
     xDomainRef.current = { min: domainStart, max: domainEnd };
+  }, [domainStart, domainEnd]);
 
-    const series = seriesList.map((s, idx) => ({
-      name: s.name || `${s.file} • ${s.column}`,
-      type: "line",
-      symbol: "none",
-      sampling: "lttb",
-      data: s.data || [],
-      lineStyle: {
-        width: 1.5,
-        color: getColor?.(s, idx),
-      },
-      emphasis: {
-        lineStyle: {
-          width: 2,
-          color: getColor?.(s, idx),
-        },
-      },
-      itemStyle: {
-        color: getColor?.(s, idx),
-      },
-    }));
-
-    const option = {
-      backgroundColor: "transparent",
-      animation: false,
-      tooltip: {
-        trigger: "axis",
-        backgroundColor: "rgba(30, 41, 59, 0.95)",
-        borderColor: "#475569",
-        textStyle: {
-          color: "#e2e8f0",
-        },
-        formatter: (params) => {
-          if (!params.length) return "";
-          const time = new Date(params[0].value[0] * 1000).toISOString();
-          let html = `<div class="font-semibold mb-2">${time}</div>`;
-          params.forEach((p) => {
-            const value = p.value[1]?.toFixed(6) ?? "N/A";
-            html += `<div class="flex justify-between gap-4">
-                          <span>${p.marker} ${p.seriesName}</span>
-                          <span class="font-mono">${value}</span>
-                      </div>`;
-          });
-          return html;
-        },
-      },
-      legend: {
-        type: "scroll",
-        top: 10,
-        textStyle: {
-          color: "#9ca3af",
-        },
-        pageTextStyle: {
-          color: "#9ca3af",
-        },
-      },
-      grid: {
-        top: 60,
-        left: 60,
-        right: 40,
-        bottom: 80,
-      },
-      xAxis: {
-        type: "value",
-        min: domainStart,
-        max: domainEnd,
-        axisLabel: {
-          formatter: (val) => {
-            const date = new Date(val * 1000);
-            return date.toISOString().substr(11, 8);
-          },
-          color: "#9ca3af",
-        },
-        axisLine: {
-          lineStyle: { color: "#374151" },
-        },
-        splitLine: {
-          lineStyle: { color: "#1f2937" },
-        },
-      },
-      yAxis: {
-        type: "value",
-        axisLabel: {
-          color: "#9ca3af",
-          formatter: (val) => val.toPrecision(4),
-        },
-        axisLine: {
-          lineStyle: { color: "#374151" },
-        },
-        splitLine: {
-          lineStyle: { color: "#1f2937" },
-        },
-      },
-      brush: interactionMode === "box"
-        ? {
-            toolbox: [],
-            xAxisIndex: 0,
-            yAxisIndex: 0,
-            brushMode: "single",
-            brushType: "rect",
-            transformable: false,
-            throttleType: "debounce",
-            throttleDelay: 100,
-            brushStyle: {
-              color: "rgba(59, 130, 246, 0.15)",
-              borderWidth: 1,
-              borderColor: "#3b82f6",
-            },
-          }
-        : { toolbox: [] },
-      dataZoom: [
-        {
-          id: "x-inside",
-          type: "inside",
-          xAxisIndex: 0,
-          filterMode: "none",
-          throttle: 100,
-          startValue: rangeStart,
-          endValue: rangeEnd,
-          zoomOnMouseWheel: false,
-          moveOnMouseWheel: false,
-          moveOnMouseMove: interactionMode === "pan" && !shiftDown,
-        },
-        {
-          id: "x-slider",
-          type: "slider",
-          xAxisIndex: 0,
-          filterMode: "none",
-          bottom: 20,
-          height: 30,
-          borderColor: "#374151",
-          backgroundColor: "#1f2937",
-          fillerColor: "rgba(59, 130, 246, 0.2)",
-          handleStyle: {
-            color: "#3b82f6",
-          },
-          textStyle: {
-            color: "#9ca3af",
-          },
-          brushSelect: false,
-          startValue: rangeStart,
-          endValue: rangeEnd,
-        },
-        {
-          id: "y-inside",
-          type: "inside",
-          yAxisIndex: 0,
-          filterMode: "none",
-          throttle: 100,
-          zoomOnMouseWheel: false,
-          moveOnMouseWheel: false,
-          moveOnMouseMove: interactionMode === "pan" && shiftDown,
-        },
-      ],
-      series,
-      color: COLORS,
-      toolbox: {
-        show: false,
-      },
-    };
-
-    isZooming.current = true;
-    chartInstance.current.setOption(option, { notMerge: false, replaceMerge: ["series"] });
-    isZooming.current = false;
-
-    chartInstance.current.off("datazoom");
-    chartInstance.current.on(
-      "datazoom",
-      debounce(() => {
-        if (isZooming.current) return;
-        const model = chartInstance.current?.getModel();
-        if (!model) return;
-        const xAxis = model.getComponent("xAxis", 0);
-        const extent = xAxis?.axis?.scale?.getExtent?.() || [];
-        if (extent[0] !== undefined && extent[1] !== undefined && isFinite(extent[0]) && isFinite(extent[1])) {
-          emitZoom(extent[0], extent[1]);
-        }
-      }, 300)
-    );
-
-    chartInstance.current.off("brushEnd");
-    if (interactionMode === "box") {
-      chartInstance.current.on("brushEnd", (params) => {
-        const area = params.areas?.[0];
-        const xRange = area?.coordRange?.[0];
-        const yRange = area?.coordRange?.[1];
-        const [xStart, xEnd] = xRange || [];
-        const [yStart, yEnd] = yRange || [];
-        if (!isFinite(xStart) || !isFinite(xEnd) || xStart === xEnd) return;
-        const minX = Math.min(xStart, xEnd);
-        const maxX = Math.max(xStart, xEnd);
-        const minY = isFinite(yStart) && isFinite(yEnd) ? Math.min(yStart, yEnd) : null;
-        const maxY = isFinite(yStart) && isFinite(yEnd) ? Math.max(yStart, yEnd) : null;
-        chartInstance.current?.dispatchAction({
-          type: "dataZoom",
-          dataZoomId: "x-inside",
-          startValue: minX,
-          endValue: maxX,
-        });
-        chartInstance.current?.dispatchAction({
-          type: "dataZoom",
-          dataZoomId: "x-slider",
-          startValue: minX,
-          endValue: maxX,
-        });
-        if (minY != null && maxY != null && minY !== maxY) {
-          chartInstance.current?.dispatchAction({
-            type: "dataZoom",
-            dataZoomId: "y-inside",
-            startValue: minY,
-            endValue: maxY,
-          });
-        }
-        chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
-      });
-    }
-  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown]);
-
+  // Track shift key
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.shiftKey) setShiftDown(true);
+      if (e.shiftKey) shiftDownRef.current = true;
     };
     const handleKeyUp = (e) => {
-      if (!e.shiftKey) setShiftDown(false);
+      if (!e.shiftKey) shiftDownRef.current = false;
     };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
@@ -678,135 +446,422 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
     };
   }, []);
 
-  useEffect(() => {
-    shiftDownRef.current = shiftDown;
-  }, [shiftDown]);
+  // Build series config for uPlot
+  const seriesConfig = useMemo(() => {
+    return [
+      { label: "Time" },
+      ...seriesList.map((s, idx) => ({
+        label: s.name || `${s.file} • ${s.column}`,
+        stroke: getColor?.(s, idx) || COLORS[idx % COLORS.length],
+        width: 1.5,
+        points: { show: false },
+        spanGaps: false,
+      })),
+    ];
+  }, [seriesList, getColor]);
 
+  // Create/destroy uPlot instance
   useEffect(() => {
-    if (!chartInstance.current) return;
-    if (interactionMode === "box") {
-      chartInstance.current.dispatchAction({
-        type: "takeGlobalCursor",
-        key: "brush",
-        brushOption: {
-          brushType: "rect",
-          brushMode: "single",
-        },
-      });
-    } else {
-      chartInstance.current.dispatchAction({
-        type: "takeGlobalCursor",
-        key: "brush",
-        brushOption: { brushType: false },
-      });
-      chartInstance.current.dispatchAction({ type: "brush", areas: [] });
+    if (!containerRef.current) return;
+
+    // Clean up existing instance
+    if (uplotRef.current) {
+      uplotRef.current.destroy();
+      uplotRef.current = null;
     }
-  }, [interactionMode]);
 
-  useEffect(() => {
-    if (!chartInstance.current) return;
-    isZooming.current = true;
-    chartInstance.current.dispatchAction({
-      type: "dataZoom",
-      dataZoomId: "y-inside",
-      start: 0,
-      end: 100,
+    // Create tooltip element
+    if (!tooltipRef.current) {
+      tooltipRef.current = document.createElement("div");
+      tooltipRef.current.className = "uplot-tooltip";
+      containerRef.current.appendChild(tooltipRef.current);
+    }
+
+    const width = containerRef.current.clientWidth || 800;
+    const height = 360;
+
+    const opts = {
+      width,
+      height,
+      series: seriesConfig,
+      scales: {
+        x: {
+          time: false, // We're using Unix timestamps directly
+          range: (u, min, max) => {
+            // Use current view range if available
+            const rMin = rangeStart ?? min;
+            const rMax = rangeEnd ?? max;
+            return [rMin, rMax];
+          },
+        },
+        y: {
+          auto: true,
+          range: (u, min, max) => {
+            if (min === max) {
+              return [min - 1, max + 1];
+            }
+            const padding = (max - min) * 0.05;
+            return [min - padding, max + padding];
+          },
+        },
+      },
+      axes: [
+        {
+          stroke: "#9ca3af",
+          grid: { stroke: "#1f2937", width: 1 },
+          ticks: { stroke: "#374151", width: 1 },
+          values: (u, vals) =>
+            vals.map((v) => {
+              const date = new Date(v * 1000);
+              return date.toISOString().substring(11, 19);
+            }),
+          font: "12px system-ui, sans-serif",
+          gap: 8,
+        },
+        {
+          stroke: "#9ca3af",
+          grid: { stroke: "#1f2937", width: 1 },
+          ticks: { stroke: "#374151", width: 1 },
+          values: (u, vals) => vals.map((v) => (v != null ? v.toPrecision(4) : "")),
+          font: "12px system-ui, sans-serif",
+          size: 60,
+          gap: 8,
+        },
+      ],
+      cursor: {
+        show: true,
+        points: { show: false },
+        drag: {
+          x: interactionMode === "box",
+          y: interactionMode === "box",
+          uni: 20,
+        },
+        sync: { key: null },
+      },
+      legend: {
+        show: true,
+        live: true,
+      },
+      padding: [60, 20, 20, 10],
+      hooks: {
+        setSelect: [
+          (u) => {
+            if (interactionMode !== "box") return;
+            const { left, width, top, height } = u.select;
+
+            if (width > 0) {
+              const xMin = u.posToVal(left, "x");
+              const xMax = u.posToVal(left + width, "x");
+
+              const minX = Math.min(xMin, xMax);
+              const maxX = Math.max(xMin, xMax);
+
+              if (Number.isFinite(minX) && Number.isFinite(maxX) && minX !== maxX) {
+                isUpdatingScale.current = true;
+                u.setScale("x", { min: minX, max: maxX });
+                isUpdatingScale.current = false;
+
+                debouncedZoom(minX, maxX);
+              }
+
+              // Clear selection
+              u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false);
+            }
+          },
+        ],
+        setScale: [
+          (u, key) => {
+            if (key !== "x" || isUpdatingScale.current) return;
+            const { min, max } = u.scales.x;
+            if (Number.isFinite(min) && Number.isFinite(max)) {
+              debouncedZoom(min, max);
+            }
+          },
+        ],
+        setCursor: [
+          (u) => {
+            const { idx, left } = u.cursor;
+            const tooltip = tooltipRef.current;
+            if (!tooltip) return;
+
+            if (idx == null || left == null || left < 0) {
+              tooltip.style.display = "none";
+              return;
+            }
+
+            const timestamp = u.data[0][idx];
+            if (timestamp == null) {
+              tooltip.style.display = "none";
+              return;
+            }
+
+            const time = new Date(timestamp * 1000).toISOString();
+            let html = `<div style="font-weight: 600; margin-bottom: 8px">${time}</div>`;
+
+            u.series.forEach((s, i) => {
+              if (i === 0 || !s.show) return;
+              const val = u.data[i]?.[idx];
+              const color = s._stroke || s.stroke;
+              html += `
+                <div style="display: flex; justify-content: space-between; gap: 16px; margin: 4px 0">
+                  <span>
+                    <span style="display: inline-block; width: 8px; height: 8px;
+                      background: ${color}; border-radius: 50%; margin-right: 6px"></span>
+                    ${s.label}
+                  </span>
+                  <span style="font-family: monospace">${val != null ? val.toFixed(6) : "N/A"}</span>
+                </div>
+              `;
+            });
+
+            tooltip.innerHTML = html;
+            tooltip.style.display = "block";
+
+            // Position tooltip
+            const rect = containerRef.current.getBoundingClientRect();
+            const tooltipRect = tooltip.getBoundingClientRect();
+
+            let x = left + 15;
+            let y = 80;
+
+            if (x + tooltipRect.width > rect.width - 20) {
+              x = left - tooltipRect.width - 15;
+            }
+            if (x < 10) x = 10;
+
+            tooltip.style.left = x + "px";
+            tooltip.style.top = y + "px";
+          },
+        ],
+        ready: [
+          (u) => {
+            const over = u.root.querySelector(".u-over");
+            if (!over) return;
+
+            // Wheel zoom handler
+            over.addEventListener("wheel", (e) => {
+              e.preventDefault();
+
+              const delta = e.deltaY;
+              if (delta === 0) return;
+
+              const factor = 0.75;
+              const zoomIn = delta < 0;
+              const zoomFactor = zoomIn ? factor : 1 / factor;
+
+              const shiftHeld = shiftDownRef.current || e.shiftKey;
+              const axis = shiftHeld ? "y" : "x";
+
+              const rect = over.getBoundingClientRect();
+              const cursorX = e.clientX - rect.left;
+              const cursorY = e.clientY - rect.top;
+
+              const scale = u.scales[axis];
+              const curMin = scale.min;
+              const curMax = scale.max;
+              if (!Number.isFinite(curMin) || !Number.isFinite(curMax)) return;
+
+              const range = curMax - curMin;
+              const newRange = range * zoomFactor;
+
+              // Get anchor point in data space
+              const anchor = axis === "x"
+                ? u.posToVal(cursorX, "x")
+                : u.posToVal(cursorY, "y");
+
+              if (!Number.isFinite(anchor)) return;
+
+              const anchorRatio = (anchor - curMin) / range;
+              let newMin = anchor - newRange * anchorRatio;
+              let newMax = newMin + newRange;
+
+              // Clamp to domain for X axis
+              if (axis === "x") {
+                const domainMin = xDomainRef.current.min ?? curMin;
+                const domainMax = xDomainRef.current.max ?? curMax;
+                const maxRange = domainMax - domainMin;
+
+                if (newRange > maxRange) {
+                  newMin = domainMin;
+                  newMax = domainMax;
+                } else {
+                  if (newMin < domainMin) {
+                    newMin = domainMin;
+                    newMax = newMin + newRange;
+                  }
+                  if (newMax > domainMax) {
+                    newMax = domainMax;
+                    newMin = newMax - newRange;
+                  }
+                }
+              }
+
+              isUpdatingScale.current = true;
+              u.setScale(axis, { min: newMin, max: newMax });
+              isUpdatingScale.current = false;
+
+              if (axis === "x") {
+                debouncedZoom(newMin, newMax);
+              }
+            });
+
+            // Pan handlers
+            over.addEventListener("mousedown", (e) => {
+              if (interactionMode !== "pan" || e.button !== 0) return;
+
+              isPanning.current = true;
+              panStart.current = {
+                x: e.clientX,
+                y: e.clientY,
+                xMin: u.scales.x.min,
+                xMax: u.scales.x.max,
+                yMin: u.scales.y.min,
+                yMax: u.scales.y.max,
+              };
+              over.style.cursor = "grabbing";
+            });
+
+            const handleMouseMove = (e) => {
+              if (!isPanning.current || !uplotRef.current) return;
+
+              const u = uplotRef.current;
+              const rect = over.getBoundingClientRect();
+
+              const shiftHeld = shiftDownRef.current || e.shiftKey;
+
+              if (!shiftHeld) {
+                // Pan X axis
+                const dx = e.clientX - panStart.current.x;
+                const pxPerUnit = rect.width / (panStart.current.xMax - panStart.current.xMin);
+                const deltaUnits = -dx / pxPerUnit;
+
+                let newMin = panStart.current.xMin + deltaUnits;
+                let newMax = panStart.current.xMax + deltaUnits;
+
+                // Clamp to domain
+                const domainMin = xDomainRef.current.min ?? newMin;
+                const domainMax = xDomainRef.current.max ?? newMax;
+                const range = newMax - newMin;
+
+                if (newMin < domainMin) {
+                  newMin = domainMin;
+                  newMax = newMin + range;
+                }
+                if (newMax > domainMax) {
+                  newMax = domainMax;
+                  newMin = newMax - range;
+                }
+
+                isUpdatingScale.current = true;
+                u.setScale("x", { min: newMin, max: newMax });
+                isUpdatingScale.current = false;
+              } else {
+                // Pan Y axis
+                const dy = e.clientY - panStart.current.y;
+                const pxPerUnit = rect.height / (panStart.current.yMax - panStart.current.yMin);
+                const deltaUnits = dy / pxPerUnit;
+
+                const newMin = panStart.current.yMin + deltaUnits;
+                const newMax = panStart.current.yMax + deltaUnits;
+
+                isUpdatingScale.current = true;
+                u.setScale("y", { min: newMin, max: newMax });
+                isUpdatingScale.current = false;
+              }
+            };
+
+            const handleMouseUp = () => {
+              if (isPanning.current && uplotRef.current) {
+                isPanning.current = false;
+                over.style.cursor = "";
+
+                const { min, max } = uplotRef.current.scales.x;
+                if (Number.isFinite(min) && Number.isFinite(max)) {
+                  debouncedZoom(min, max);
+                }
+              }
+            };
+
+            document.addEventListener("mousemove", handleMouseMove);
+            document.addEventListener("mouseup", handleMouseUp);
+
+            // Store cleanup functions
+            u._cleanupPan = () => {
+              document.removeEventListener("mousemove", handleMouseMove);
+              document.removeEventListener("mouseup", handleMouseUp);
+            };
+          },
+        ],
+        destroy: [
+          (u) => {
+            u._cleanupPan?.();
+          },
+        ],
+      },
+    };
+
+    // Only create chart if we have data
+    if (uplotData[0]?.length > 0) {
+      uplotRef.current = new uPlot(opts, uplotData, containerRef.current);
+    }
+
+    // Resize observer
+    const resizeObserver = new ResizeObserver(() => {
+      if (uplotRef.current && containerRef.current) {
+        uplotRef.current.setSize({
+          width: containerRef.current.clientWidth,
+          height: 360,
+        });
+      }
     });
-    isZooming.current = false;
-  }, [resetToken]);
+    resizeObserver.observe(containerRef.current);
 
-  useEffect(() => {
-    if (!chartInstance.current) return;
-    const zr = chartInstance.current.getZr();
-
-    const handleWheel = (e) => {
-      if (!chartInstance.current) return;
-      const delta = e.event?.deltaY ?? e.event?.wheelDelta ?? 0;
-      if (delta === 0) return;
-      e.event?.preventDefault?.();
-
-      const base = 1.0015;
-      const zoomFactor = Math.pow(base, delta);
-      if (!isFinite(zoomFactor) || zoomFactor === 1) return;
-
-      const shiftHeld = shiftDownRef.current || !!e.event?.shiftKey;
-
-      const point = chartInstance.current.convertFromPixel(
-        { xAxisIndex: 0, yAxisIndex: 0 },
-        [e.offsetX, e.offsetY]
-      );
-      const anchorX = point?.[0];
-      const anchorY = point?.[1];
-
-      const model = chartInstance.current.getModel();
-      if (!model) return;
-
-      const applyZoom = (axis) => {
-        const comp = model.getComponent(axis === "x" ? "xAxis" : "yAxis", 0);
-        const extent = comp?.axis?.scale?.getExtent?.();
-        if (!extent || extent.length < 2) return;
-        let [curMin, curMax] = extent;
-        if (!isFinite(curMin) || !isFinite(curMax) || curMin === curMax) return;
-
-        const anchor = isFinite(axis === "x" ? anchorX : anchorY)
-          ? axis === "x"
-            ? anchorX
-            : anchorY
-          : (curMin + curMax) / 2;
-
-        const span = curMax - curMin;
-        let newSpan = span * zoomFactor;
-        const minSpan = span / 1e6 || 1e-9;
-        newSpan = Math.max(minSpan, newSpan);
-
-        let newMin = anchor - (anchor - curMin) * zoomFactor;
-        let newMax = newMin + newSpan;
-
-        if (axis === "x") {
-          const domainMin = xDomainRef.current.min ?? curMin;
-          const domainMax = xDomainRef.current.max ?? curMax;
-          const maxSpan = domainMax - domainMin;
-          newSpan = Math.min(newSpan, maxSpan);
-          newMin = Math.max(domainMin, Math.min(newMin, domainMax - newSpan));
-          newMax = newMin + newSpan;
-        }
-
-        if (axis === "x") {
-          chartInstance.current.dispatchAction({
-            type: "dataZoom",
-            dataZoomId: "x-inside",
-            startValue: newMin,
-            endValue: newMax,
-          });
-          chartInstance.current.dispatchAction({
-            type: "dataZoom",
-            dataZoomId: "x-slider",
-            startValue: newMin,
-            endValue: newMax,
-          });
-        } else {
-          chartInstance.current.dispatchAction({
-            type: "dataZoom",
-            dataZoomId: "y-inside",
-            startValue: newMin,
-            endValue: newMax,
-          });
-        }
-      };
-
-      if (shiftHeld) {
-        applyZoom("y");
-      } else {
-        applyZoom("x");
+    return () => {
+      resizeObserver.disconnect();
+      if (uplotRef.current) {
+        uplotRef.current.destroy();
+        uplotRef.current = null;
       }
     };
+  }, [seriesConfig, interactionMode]);
 
-    zr.on("mousewheel", handleWheel);
-    return () => {
-      zr.off("mousewheel", handleWheel);
-    };
-  }, []);
+  // Update data when it changes
+  useEffect(() => {
+    if (uplotRef.current && uplotData[0]?.length > 0) {
+      uplotRef.current.setData(uplotData);
+    }
+  }, [uplotData]);
 
+  // Sync external range changes
+  useEffect(() => {
+    if (!uplotRef.current) return;
+    if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd)) return;
+
+    const current = uplotRef.current.scales.x;
+    const tolerance = 1e-4;
+
+    if (
+      Math.abs((current.min ?? 0) - rangeStart) > tolerance ||
+      Math.abs((current.max ?? 0) - rangeEnd) > tolerance
+    ) {
+      isUpdatingScale.current = true;
+      uplotRef.current.setScale("x", { min: rangeStart, max: rangeEnd });
+      isUpdatingScale.current = false;
+    }
+  }, [rangeStart, rangeEnd]);
+
+  // Reset Y axis when resetToken changes
+  useEffect(() => {
+    if (!uplotRef.current || resetToken === undefined) return;
+
+    // Force Y axis to auto-range by clearing and setting data
+    const data = uplotRef.current.data;
+    if (data) {
+      uplotRef.current.setData(data);
+    }
+  }, [resetToken]);
+
+  // Loading state
   useEffect(() => {
     if (loading) {
       if (loaderTimerRef.current) clearTimeout(loaderTimerRef.current);
@@ -865,7 +920,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
           </div>
         </div>
       )}
-      <div ref={chartRef} className="w-full h-[360px]"></div>
+      <div ref={containerRef} className="w-full h-[360px]"></div>
     </div>
   );
 };

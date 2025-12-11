@@ -268,6 +268,46 @@ const Utils = (() => {
     "#6366f1",
   ];
 
+  /**
+   * Convert seriesList to uPlot aligned data format.
+   * Input: [{name, data: [[x,y], [x,y], ...], ...}, ...]
+   * Output: [[x1,x2,...], [y1_s1,y2_s1,...], [y1_s2,y2_s2,...], ...]
+   *
+   * All series must share the same X values (time axis).
+   * If series have different X values, we merge and align them with nulls.
+   */
+  function toUPlotData(seriesList) {
+    if (!seriesList || seriesList.length === 0) {
+      return [[]];
+    }
+
+    // Build a map of all unique X values across all series
+    const timeMap = new Map();
+    seriesList.forEach((s, seriesIdx) => {
+      (s.data || []).forEach(([x, y]) => {
+        if (!timeMap.has(x)) {
+          timeMap.set(x, new Array(seriesList.length).fill(null));
+        }
+        timeMap.get(x)[seriesIdx] = y;
+      });
+    });
+
+    // Sort by time
+    const sortedTimes = Array.from(timeMap.keys()).sort((a, b) => a - b);
+
+    if (sortedTimes.length === 0) {
+      return [[], ...seriesList.map(() => [])];
+    }
+
+    // Build columnar arrays
+    const xValues = sortedTimes;
+    const yArrays = seriesList.map((_, seriesIdx) =>
+      sortedTimes.map(t => timeMap.get(t)[seriesIdx])
+    );
+
+    return [xValues, ...yArrays];
+  }
+
   return {
     formatBytes,
     formatNumber,
@@ -281,6 +321,7 @@ const Utils = (() => {
     buildMinMaxQuery,
     buildAvgQuery,
     resultsToColumnar,
+    toUPlotData,
     COLORS,
   };
 })();

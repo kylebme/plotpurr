@@ -33,10 +33,57 @@
     ></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- ECharts -->
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <!-- uPlot -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
 
     <style>
+      /* uPlot dark theme overrides */
+      .uplot {
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      .uplot .u-title {
+        color: #e2e8f0;
+        font-size: 14px;
+      }
+      .uplot .u-legend {
+        background: transparent;
+        color: #9ca3af;
+        font-size: 12px;
+        padding: 8px 0;
+      }
+      .uplot .u-legend .u-series {
+        padding: 4px 8px;
+      }
+      .uplot .u-legend .u-series:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .uplot .u-legend .u-value {
+        font-family: monospace;
+        min-width: 80px;
+        text-align: right;
+      }
+      .uplot .u-select {
+        background: rgba(59, 130, 246, 0.15);
+        border: 1px solid #3b82f6;
+      }
+      .uplot .u-cursor-x,
+      .uplot .u-cursor-y {
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+      .uplot-tooltip {
+        position: absolute;
+        pointer-events: none;
+        background: rgba(30, 41, 59, 0.95);
+        border: 1px solid #475569;
+        border-radius: 6px;
+        padding: 10px 14px;
+        color: #e2e8f0;
+        font-size: 12px;
+        z-index: 100;
+        display: none;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      }
       /* Custom scrollbar */
       ::-webkit-scrollbar {
         width: 8px;
