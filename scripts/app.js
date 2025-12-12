@@ -31,6 +31,7 @@ const App = () => {
   const [plotData, setPlotData] = useState({});
   const [plotStats, setPlotStats] = useState({});
   const [plotLoading, setPlotLoading] = useState({});
+  const [plotOverviewData, setPlotOverviewData] = useState({});
   const [resetToken, setResetToken] = useState(0);
 
   const [loadingFiles, setLoadingFiles] = useState(true);
@@ -63,6 +64,7 @@ const App = () => {
     setPlotData({});
     setPlotStats({});
     setPlotLoading({});
+    setPlotOverviewData({});
     setFileFormats({});
     setTimeRange(null);
     setCurrentRange(null);
@@ -257,6 +259,19 @@ const App = () => {
         const queryTime = Math.round(performance.now() - queryStart);
 
         setPlotData((prev) => ({ ...prev, [plot.id]: filtered }));
+        // Preserve the first/complete-range fetch as the overview shown in the dataZoom mini map.
+        const isFullRangeFetch =
+          timeRange &&
+          currentRange &&
+          Math.abs(currentRange.start - timeRange.min) < 1e-6 &&
+          Math.abs(currentRange.end - timeRange.max) < 1e-6;
+        setPlotOverviewData((prev) => {
+          const existing = prev[plot.id];
+          if (isFullRangeFetch || !existing || existing.length === 0) {
+            return { ...prev, [plot.id]: filtered };
+          }
+          return prev;
+        });
         setPlotStats((prev) => ({
           ...prev,
           [plot.id]: {
@@ -272,7 +287,16 @@ const App = () => {
         setPlotLoading((prev) => ({ ...prev, [plot.id]: false }));
       }
     },
-    [currentRange?.start, currentRange?.end, settings.maxPoints, settings.downsampleMethod, columnsByFile, fileFormats]
+    [
+      currentRange?.start,
+      currentRange?.end,
+      timeRange?.min,
+      timeRange?.max,
+      settings.maxPoints,
+      settings.downsampleMethod,
+      columnsByFile,
+      fileFormats,
+    ]
   );
 
   useEffect(() => {
@@ -281,6 +305,11 @@ const App = () => {
     plots.forEach((plot) => {
       if (plot.series.length === 0) {
         setPlotData((prev) => {
+          const next = { ...prev };
+          delete next[plot.id];
+          return next;
+        });
+        setPlotOverviewData((prev) => {
           const next = { ...prev };
           delete next[plot.id];
           return next;
@@ -434,6 +463,19 @@ const App = () => {
         plot.id === plotId ? { ...plot, series: plot.series.filter((s) => s.id !== seriesId) } : plot
       )
     );
+    setPlotOverviewData((prev) => {
+      const existing = prev[plotId];
+      if (!existing) return prev;
+      const nextSeries = existing.filter((s) => s.id !== seriesId);
+      if (nextSeries.length === existing.length) return prev;
+      const next = { ...prev };
+      if (nextSeries.length) {
+        next[plotId] = nextSeries;
+      } else {
+        delete next[plotId];
+      }
+      return next;
+    });
   }, []);
 
   const handleRemovePlot = useCallback(
@@ -456,6 +498,11 @@ const App = () => {
         return next;
       });
       setPlotLoading((prev) => {
+        const next = { ...prev };
+        delete next[plotId];
+        return next;
+      });
+      setPlotOverviewData((prev) => {
         const next = { ...prev };
         delete next[plotId];
         return next;
@@ -532,6 +579,7 @@ const App = () => {
             title={plotTitleMap[plot.id] || "Plot"}
             plotId={plot.id}
             series={seriesData}
+            overviewSeries={plotOverviewData[plot.id]}
             viewRange={currentRange || timeRange}
             fullTimeRange={timeRange}
             onZoom={handleZoom}

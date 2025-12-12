@@ -327,6 +327,7 @@ const PlotPanel = ({
   title,
   plotId,
   series,
+  overviewSeries,
   viewRange,
   fullTimeRange,
   onZoom,
@@ -425,6 +426,7 @@ const PlotPanel = ({
         {series.length > 0 ? (
           <Chart
             seriesList={series}
+            overviewSeries={overviewSeries}
             onZoom={onZoom}
             loading={loading}
             viewRange={viewRange}
@@ -451,6 +453,7 @@ const PlotPanel = ({
 
 const Chart = ({
   seriesList = [],
+  overviewSeries = [],
   onZoom,
   loading,
   viewRange,
@@ -548,7 +551,7 @@ const Chart = ({
     }
 
 
-    const series = seriesList.map((s, idx) => ({
+    const displaySeries = seriesList.map((s, idx) => ({
       name: s.name || `${s.file} • ${s.column}`,
       type: "line",
       symbol: "none",
@@ -567,6 +570,23 @@ const Chart = ({
       itemStyle: {
         color: getColor?.(s, idx),
       },
+    }));
+
+    const shadowSource = overviewSeries && overviewSeries.length ? overviewSeries : seriesList;
+    // Keep a hidden copy of the original full-range data so the dataZoom shadow stays as a bird's eye view.
+    const shadowSeries = shadowSource.map((s, idx) => ({
+      id: `overview-${s.id || idx}`,
+      name: "",
+      type: "line",
+      symbol: "none",
+      data: s.data || [],
+      silent: true,
+      tooltip: { show: false },
+      lineStyle: { opacity: 0, width: 0 },
+      itemStyle: { opacity: 0 },
+      emphasis: { disabled: true },
+      animation: false,
+      z: -20,
     }));
 
     const tooltip = showTooltip
@@ -601,6 +621,7 @@ const Chart = ({
       legend: {
         type: "scroll",
         top: 10,
+        data: displaySeries.map((s) => s.name),
         textStyle: {
           color: "#9ca3af",
         },
@@ -708,7 +729,7 @@ const Chart = ({
           moveOnMouseMove: interactionMode === "pan" && shiftDown,
         },
       ],
-      series,
+      series: [...shadowSeries, ...displaySeries],
       color: COLORS,
       toolbox: {
         show: false,
@@ -770,7 +791,7 @@ const Chart = ({
         chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
       });
     }
-  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
+  }, [seriesList, overviewSeries, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
