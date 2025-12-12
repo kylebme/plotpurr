@@ -2,7 +2,7 @@
 """
 Very thin ChDB (ClickHouse) backend:
 - Serves index.html and other static files from the current directory
-- Lists parquet files
+- Lists supported data files (parquet, csv, jsonl, etc.)
 - Executes SQL provided by the frontend and returns (columns, rows)
 All query logic and SQL text live in the frontend.
 """
@@ -12,6 +12,7 @@ import logging
 import os
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlparse
 import chdb
 import webbrowser
@@ -22,17 +23,35 @@ PORT = 8765
 PARQUET_DIR = Path(".").resolve()
 LOG_LEVEL = logging.INFO
 
+SUPPORTED_FORMATS = {
+    ".parquet": "Parquet",
+    ".csv": "CSVWithNames",
+    ".tsv": "TSVWithNames",
+    ".json": "JSONEachRow",
+    ".jsonl": "JSONEachRow",
+    ".ndjson": "JSONEachRow",
+    ".arrow": "Arrow",
+    ".feather": "Arrow",
+    ".orc": "ORC",
+    ".avro": "Avro",
+}
+
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 SELECTED_PATHS = []
 
 
+def _infer_format(path: Path) -> Optional[str]:
+    """Return the ClickHouse file() format name for the given file path."""
+    return SUPPORTED_FORMATS.get(path.suffix.lower())
+
+
 class ChDBRequestHandler(SimpleHTTPRequestHandler):
     """
     HTTP handler that:
-    - Serves static files (index.html, parquet, etc.)
-    - GET /api/files -> list of parquet files (no SQL)
+    - Serves static files (index.html, data files, etc.)
+    - GET /api/files -> list of data files (no SQL)
     - POST /api/sql  -> execute arbitrary SQL and return rows
     """
 
@@ -98,9 +117,13 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
 
     # ---------- Endpoint handlers ----------
 
-    def _collect_parquet_files(self):
-        """Return a list of Path objects for configured parquet files."""
-        paths = SELECTED_PATHS or [str(p) for p in PARQUET_DIR.glob("*.parquet")]
+    def _collect_data_files(self):
+        """Return a list of (Path, format) tuples for configured data files."""
+        default_paths = []
+        for ext in SUPPORTED_FORMATS:
+            default_paths.extend(PARQUET_DIR.glob(f"*{ext}"))
+
+        paths = SELECTED_PATHS or [str(p) for p in default_paths]
 
         files = []
         seen = set()
@@ -109,19 +132,24 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
             if p in seen:
                 continue
             if p.is_dir():
-                for child in sorted(p.glob("*.parquet")):
-                    if child not in seen:
-                        files.append(child)
-                        seen.add(child)
-            elif p.is_file() and p.suffix.lower() == ".parquet":
-                files.append(p)
-                seen.add(p)
+                for ext, _ in SUPPORTED_FORMATS.items():
+                    for child in sorted(p.glob(f"*{ext}")):
+                        if child not in seen:
+                            fmt = _infer_format(child)
+                            if fmt:
+                                files.append((child, fmt))
+                                seen.add(child)
+            elif p.is_file():
+                fmt = _infer_format(p)
+                if fmt:
+                    files.append((p, fmt))
+                    seen.add(p)
         return files
 
     def _handle_list_files(self):
-        """Return basic info about parquet files from the selected paths or default directory."""
+        """Return basic info about supported data files from the selected paths or default directory."""
         files = []
-        for f in self._collect_parquet_files():
+        for f, fmt in self._collect_data_files():
             try:
                 stat = f.stat()
                 files.append(
@@ -130,6 +158,7 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
                         "path": str(f),
                         "size_bytes": stat.st_size,
                         "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                        "format": fmt,
                     }
                 )
             except OSError as exc:
@@ -170,7 +199,7 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
 
         global SELECTED_PATHS
         SELECTED_PATHS = normalized
-        logger.info("Updated parquet search paths: %s", SELECTED_PATHS)
+        logger.info("Updated data search paths: %s", SELECTED_PATHS)
         self._send_json({"ok": True, "count": len(SELECTED_PATHS)})
 
     def _handle_sql(self):

@@ -6,6 +6,13 @@ const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const SERVER_URL = "http://localhost:8765";
 const PROJECT_ROOT = path.join(__dirname, "..");
 const SERVER_SCRIPT = path.join(PROJECT_ROOT, "server.py");
+const DATA_FILE_FILTERS = [
+  {
+    name: "Data Files",
+    extensions: ["parquet", "csv", "tsv", "json", "jsonl", "ndjson", "arrow", "feather", "orc", "avro"],
+  },
+  { name: "All Files", extensions: ["*"] },
+];
 
 let pythonProcess = null;
 let isQuitting = false;
@@ -80,14 +87,17 @@ const startApp = async () => {
 
 app.whenReady().then(startApp);
 
-ipcMain.handle("select-parquet-paths", async () => {
+const showFilePicker = async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openFile", "openDirectory", "multiSelections", "dontAddToRecent"],
-    filters: [{ name: "Parquet Files", extensions: ["parquet"] }],
+    filters: DATA_FILE_FILTERS,
   });
   if (result.canceled) return [];
   return result.filePaths || [];
-});
+};
+
+ipcMain.handle("select-parquet-paths", showFilePicker);
+ipcMain.handle("select-data-paths", showFilePicker);
 
 app.on("before-quit", () => {
   isQuitting = true;

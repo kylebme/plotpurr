@@ -20,6 +20,7 @@ const App = () => {
     downsampleMethod: "minmax",
     showTooltip: true,
   });
+  const [fileFormats, setFileFormats] = useState({});
 
   const plotCounterRef = useRef(1);
   const seriesCounterRef = useRef(1);
@@ -34,7 +35,8 @@ const App = () => {
 
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingColumns, setLoadingColumns] = useState(false);
-  const canBrowse = !!window.electronAPI?.selectParquetPaths;
+  const browseFn = window.electronAPI?.selectDataPaths || window.electronAPI?.selectParquetPaths;
+  const canBrowse = !!browseFn;
 
   const selectedFileKey = getFileKey(selectedFile);
   const activeColumns = selectedFileKey ? columnsByFile[selectedFileKey] || [] : [];
@@ -61,6 +63,7 @@ const App = () => {
     setPlotData({});
     setPlotStats({});
     setPlotLoading({});
+    setFileFormats({});
     setTimeRange(null);
     setCurrentRange(null);
     setSelectedFile(null);
@@ -78,14 +81,21 @@ const App = () => {
         id: f.path || f.name,
       }));
       setFiles(normalized);
+      setFileFormats(
+        normalized.reduce((acc, f) => {
+          const key = getFileKey(f);
+          if (key) acc[key] = f.format || null;
+          return acc;
+        }, {})
+      );
     } catch (err) {
       console.error("Error loading files:", err);
     }
     setLoadingFiles(false);
   }, []);
 
-  const handleBrowseForParquet = useCallback(async () => {
-    const selector = window.electronAPI?.selectParquetPaths;
+  const handleBrowseForData = useCallback(async () => {
+    const selector = window.electronAPI?.selectDataPaths || window.electronAPI?.selectParquetPaths;
     if (!selector) {
       console.warn("Browse requires the Electron shell.");
       return;
@@ -112,6 +122,16 @@ const App = () => {
     loadFiles();
   }, [canBrowse, loadFiles]);
 
+  const getFileFormat = useCallback(
+    (file) => {
+      const key = getFileKey(file);
+      if (!key) return null;
+      if (file?.format) return file.format;
+      return fileFormats[key] || null;
+    },
+    [fileFormats]
+  );
+
   const loadColumnsForFile = useCallback(
     async (file) => {
       if (!file) return;
@@ -122,7 +142,7 @@ const App = () => {
       }
       setLoadingColumns(true);
       try {
-        const cols = await api.getColumns(fileKey);
+        const cols = await api.getColumns(fileKey, getFileFormat(file));
         setColumnsByFile((prev) => ({ ...prev, [fileKey]: cols }));
         setTimeColumnsByFile((prev) => {
           if (prev[fileKey]) return prev;
@@ -135,7 +155,7 @@ const App = () => {
       }
       setLoadingColumns(false);
     },
-    [columnsByFile]
+    [columnsByFile, getFileFormat]
   );
 
   useEffect(() => {
@@ -170,7 +190,13 @@ const App = () => {
       const timeColMeta = cols.find((c) => c.name === series.timeColumn);
       if (!timeColMeta) return;
       try {
-        const range = await api.getTimeRange(series.file, series.timeColumn, timeColMeta.type, [series.column]);
+        const range = await api.getTimeRange(
+          series.file,
+          series.timeColumn,
+          timeColMeta.type,
+          [series.column],
+          series.format || fileFormats[series.file]
+        );
         if (range.min_epoch == null || range.max_epoch == null) return;
         const nextRange = { min: range.min_epoch, max: range.max_epoch };
         setTimeRange((prev) => {
@@ -185,7 +211,7 @@ const App = () => {
         console.error("Error loading time range for series", series, err);
       }
     },
-    [columnsByFile]
+    [columnsByFile, fileFormats]
   );
 
   const fetchPlotData = useCallback(
@@ -211,6 +237,7 @@ const App = () => {
               max_points: settings.maxPoints,
               downsample_method: settings.downsampleMethod,
               columnsMeta,
+              format: series.format || fileFormats[series.file],
             });
             const timeData = result.data?.[series.timeColumn] || [];
             const valueData = result.data?.[series.column] || [];
@@ -245,7 +272,7 @@ const App = () => {
         setPlotLoading((prev) => ({ ...prev, [plot.id]: false }));
       }
     },
-    [currentRange?.start, currentRange?.end, settings.maxPoints, settings.downsampleMethod, columnsByFile]
+    [currentRange?.start, currentRange?.end, settings.maxPoints, settings.downsampleMethod, columnsByFile, fileFormats]
   );
 
   useEffect(() => {
@@ -295,6 +322,7 @@ const App = () => {
         fileName: payload.fileName,
         column: payload.column,
         timeColumn: timeCol,
+        format: fileFormats[payload.file] || null,
       };
 
       setPlots((prev) =>
@@ -308,7 +336,7 @@ const App = () => {
       );
       updateRangeForSeries(newSeries);
     },
-    [timeColumnsByFile, updateRangeForSeries]
+    [timeColumnsByFile, updateRangeForSeries, fileFormats]
   );
 
   const splitLayoutWithPlot = useCallback((node, targetPlotId, zone, newPlotId) => {
@@ -380,6 +408,7 @@ const App = () => {
               fileName: payload.fileName,
               column: payload.column,
               timeColumn: timeCol,
+              format: fileFormats[payload.file] || null,
             },
           ],
         },
@@ -396,7 +425,7 @@ const App = () => {
         timeColumn: timeCol,
       });
     },
-    [addSeriesToPlot, splitLayoutWithPlot, timeColumnsByFile, updateRangeForSeries]
+    [addSeriesToPlot, splitLayoutWithPlot, timeColumnsByFile, updateRangeForSeries, fileFormats]
   );
 
   const handleRemoveColumn = useCallback((plotId, seriesId) => {
@@ -553,7 +582,7 @@ const App = () => {
                 />
               </svg>
               <div>
-                <h1 className="text-xl font-bold text-white">Parquet Viewer</h1>
+                <h1 className="text-xl font-bold text-white">Data File Viewer</h1>
                 <p className="text-xs text-gray-400">Powered by ChDB (ClickHouse)</p>
               </div>
             </div>
@@ -579,7 +608,7 @@ const App = () => {
               selectedFile={selectedFile}
               onSelect={setSelectedFile}
               loading={loadingFiles}
-              onBrowse={canBrowse ? handleBrowseForParquet : null}
+              onBrowse={canBrowse ? handleBrowseForData : null}
             />
 
             <ColumnSelector
@@ -608,7 +637,7 @@ const App = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
                   </svg>
                   <p className="text-lg font-medium mb-2">No Data to Display</p>
-                  <p className="text-sm">Select a parquet file, then drag a variable onto the plot area to start</p>
+                  <p className="text-sm">Select a data file, then drag a variable onto the plot area to start</p>
                 </div>
               </div>
             )}
@@ -635,7 +664,7 @@ const App = () => {
       <footer className="bg-gray-800 border-t border-gray-700 py-3">
         <div className="max-w-screen-2xl mx-auto px-4">
           <div className="flex items-center justify-between text-sm text-gray-400">
-            <span>Parquet Viewer v1.0.0</span>
+            <span>Data File Viewer v1.0.0</span>
             <span>Extensible data visualization for large datasets</span>
           </div>
         </div>

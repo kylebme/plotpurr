@@ -11,7 +11,35 @@ const {
 } = window.Utils;
 
 const API_BASE = "";
-const fileTable = (file) => `file('${file}', 'Parquet')`;
+const FORMAT_BY_EXT = {
+  ".parquet": "Parquet",
+  ".csv": "CSVWithNames",
+  ".tsv": "TSVWithNames",
+  ".json": "JSONEachRow",
+  ".jsonl": "JSONEachRow",
+  ".ndjson": "JSONEachRow",
+  ".arrow": "Arrow",
+  ".feather": "Arrow",
+  ".orc": "ORC",
+  ".avro": "Avro",
+};
+
+const inferFormat = (fileName, hint) => {
+  if (hint) return hint;
+  if (!fileName) return null;
+  const lower = fileName.toLowerCase();
+  const extMatch = lower.match(/(\.[^.]+)$/);
+  const ext = extMatch ? extMatch[1] : "";
+  return FORMAT_BY_EXT[ext] || null;
+};
+
+const escapeFilePath = (file) => String(file || "").replace(/'/g, "\\'");
+
+const fileTable = (file, formatHint) => {
+  const fmt = inferFormat(file, formatHint) || "Parquet";
+  const safeFormat = fmt.replace(/[^A-Za-z]/g, "") || "Parquet";
+  return `file('${escapeFilePath(file)}', '${safeFormat}')`;
+};
 const needsFileSetting = (sql) => /\bfile\s*\(/i.test(sql);
 const hasSettingsClause = (sql) => /\bsettings\b/i.test(sql);
 const hasIntrospectionSetting = (sql) => /allow_introspection_functions\s*=\s*1/i.test(sql);
@@ -53,16 +81,16 @@ const api = {
     const filesWithCounts = await Promise.all(
       files.map(async (file) => {
         try {
-          const tableExpr = fileTable(file.name);
+          const tableExpr = fileTable(file.path || file.name, file.format);
           const result = await api.sql(`SELECT COUNT(*) AS cnt FROM ${tableExpr}`);
           const colIndex = result.columns?.indexOf("cnt") ?? (result.columns?.length ? 0 : 0);
           const row = result.rows?.[0] || [0];
           const rowCount = colIndex >= 0 && row[colIndex] != null ? row[colIndex] : row[0];
 
-          return { ...file, row_count: rowCount };
+          return { ...file, row_count: rowCount, format: inferFormat(file.name, file.format) };
         } catch (err) {
           console.error("Error getting row count for", file.name, err);
-          return { ...file, row_count: 0 };
+          return { ...file, row_count: 0, format: inferFormat(file.name, file.format) };
         }
       })
     );
@@ -85,8 +113,8 @@ const api = {
     return res.json();
   },
 
-  async getColumns(file) {
-    const tableExpr = fileTable(file);
+  async getColumns(file, format) {
+    const tableExpr = fileTable(file, format);
     const result = await api.sql(`DESCRIBE TABLE ${tableExpr}`);
 
     const nameIndex = result.columns?.indexOf("name") ?? 0;
@@ -103,13 +131,13 @@ const api = {
     });
   },
 
-  async getTimeRange(file, timeColumn, columnType, valueColumns = []) {
+  async getTimeRange(file, timeColumn, columnType, valueColumns = [], format) {
     const isTs = isTimestampType(columnType);
     const nonNullFilter =
       valueColumns && valueColumns.length
         ? `WHERE ${valueColumns.map((c) => `\`${c}\` IS NOT NULL`).join(" OR ")}`
         : "";
-    const tableExpr = fileTable(file);
+    const tableExpr = fileTable(file, format);
     let query;
 
     if (isTs) {
@@ -186,6 +214,7 @@ const api = {
       max_points,
       downsample_method,
       columnsMeta,
+      format,
     } = params;
 
     if (!file || !time_column || !value_columns?.length) {
@@ -211,7 +240,7 @@ const api = {
 
     const isTs = isTimestampType(colType);
     const whereSql = buildTimeFilter(time_column, start_time, end_time, isTs);
-    const tableExpr = fileTable(file);
+    const tableExpr = fileTable(file, format);
 
     const countQuery = `
       SELECT COUNT(*) AS cnt 

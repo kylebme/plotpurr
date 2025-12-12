@@ -19,7 +19,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
             d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
           />
         </svg>
-        Parquet Files
+        Data Files
       </h2>
 
       {onBrowse && (
@@ -38,7 +38,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
       <div className="space-y-2 max-h-60 overflow-y-auto">
         {files.length === 0 ? (
           <p className="text-gray-400 text-sm">
-            {onBrowse ? "No parquet files selected yet" : "No parquet files found"}
+            {onBrowse ? "No data files selected yet" : "No data files found"}
           </p>
         ) : (
           files.map((file) => (
@@ -50,12 +50,15 @@ const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
                   ? "bg-blue-600 text-white"
                   : "bg-gray-700 hover:bg-gray-600 text-gray-200"
               }`}
-            >
+              >
               <div className="font-medium truncate" title={file.path || file.name}>
                 {file.name}
               </div>
               <div className="text-xs opacity-75 mt-1 space-y-0.5">
-                <div>{formatBytes(file.size_bytes)} • {formatNumber(file.row_count)} rows</div>
+                <div>
+                  {formatBytes(file.size_bytes)} • {formatNumber(file.row_count)} rows •{" "}
+                  {file.format || "Auto"}
+                </div>
                 {file.path && <div className="text-[11px] text-gray-300 truncate">{file.path}</div>}
               </div>
             </button>
