@@ -11,7 +11,10 @@ const {
 } = window.Utils;
 
 const API_BASE = "";
-const fileTable = (file) => `file('${file}', 'Parquet')`;
+const fileTable = (file) => {
+  const safe = (file ?? "").toString().replace(/'/g, "''");
+  return `file('${safe}', 'Parquet')`;
+};
 const needsFileSetting = (sql) => /\bfile\s*\(/i.test(sql);
 const hasSettingsClause = (sql) => /\bsettings\b/i.test(sql);
 const hasIntrospectionSetting = (sql) => /allow_introspection_functions\s*=\s*1/i.test(sql);
@@ -53,7 +56,7 @@ const api = {
     const filesWithCounts = await Promise.all(
       files.map(async (file) => {
         try {
-          const tableExpr = fileTable(file.name);
+          const tableExpr = fileTable(file.path || file.name);
           const result = await api.sql(`SELECT COUNT(*) AS cnt FROM ${tableExpr}`);
           const colIndex = result.columns?.indexOf("cnt") ?? (result.columns?.length ? 0 : 0);
           const row = result.rows?.[0] || [0];
@@ -70,8 +73,8 @@ const api = {
     return filesWithCounts;
   },
 
-  async getColumns(file) {
-    const tableExpr = fileTable(file);
+  async getColumns(filePath) {
+    const tableExpr = fileTable(filePath);
     const result = await api.sql(`DESCRIBE TABLE ${tableExpr}`);
 
     const nameIndex = result.columns?.indexOf("name") ?? 0;
@@ -248,6 +251,21 @@ const api = {
       downsampled,
       downsample_method: downsampled ? method : null,
     };
+  },
+
+  async selectParquet(mode = "files") {
+    const res = await fetch(`${API_BASE}/api/select-paths`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Selection failed with ${res.status}: ${text || res.statusText}`);
+    }
+
+    return await res.json();
   },
 };
 

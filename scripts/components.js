@@ -7,7 +7,7 @@ const Spinner = () => (
   </div>
 );
 
-const FileSelector = ({ files, selectedFile, onSelect, loading }) => (
+const FileSelector = ({ files, selectedFile, onSelect, loading, onOpenDialog, selecting }) => (
   <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
     <h2 className="text-lg font-semibold mb-3 text-blue-400 flex items-center gap-2">
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -21,19 +21,36 @@ const FileSelector = ({ files, selectedFile, onSelect, loading }) => (
       Parquet Files
     </h2>
 
+    <div className="flex gap-2 mb-3">
+      <button
+        onClick={() => onOpenDialog?.("files")}
+        disabled={loading || selecting}
+        className="flex-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-medium"
+      >
+        {selecting ? "Waiting..." : "Select file(s)"}
+      </button>
+      <button
+        onClick={() => onOpenDialog?.("directory")}
+        disabled={loading || selecting}
+        className="flex-1 px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-medium"
+      >
+        Select folder
+      </button>
+    </div>
+
     {loading ? (
       <Spinner />
     ) : (
       <div className="space-y-2 max-h-60 overflow-y-auto">
         {files.length === 0 ? (
-          <p className="text-gray-400 text-sm">No parquet files found</p>
+          <p className="text-gray-400 text-sm">No parquet files selected. Use the buttons above to choose files or a folder.</p>
         ) : (
           files.map((file) => (
             <button
-              key={file.name}
+              key={file.path || file.name}
               onClick={() => onSelect(file)}
               className={`w-full text-left p-3 rounded-lg transition-all ${
-                selectedFile?.name === file.name
+                selectedFile?.path === file.path
                   ? "bg-blue-600 text-white"
                   : "bg-gray-700 hover:bg-gray-600 text-gray-200"
               }`}
@@ -127,12 +144,12 @@ const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColum
                     key={col.name}
                     draggable
                     onDragStart={(e) => {
-                      const payload = JSON.stringify({ column: col.name, file: file?.name });
+                      const payload = JSON.stringify({ column: col.name, file: file?.path, fileName: file?.name });
                       e.dataTransfer.setData("text/plain", payload);
                       e.dataTransfer.setData("application/json", payload);
                       e.dataTransfer.effectAllowed = "copy";
                     }}
-                    onDoubleClick={() => onColumnAdd?.({ column: col.name, file: file.name })}
+                    onDoubleClick={() => onColumnAdd?.({ column: col.name, file: file.path, fileName: file.name })}
                     className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-700/60 hover:bg-gray-700 border border-transparent hover:border-gray-600"
                   >
                     <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
@@ -368,9 +385,9 @@ const PlotPanel = ({
                 <span
                   className="inline-block w-2.5 h-2.5 rounded-full"
                   style={{ backgroundColor: getColor?.(s) }}
-                  title={s.file}
+                  title={s.fileName || s.file}
                 />
-                {s.file} • {s.column}
+                {s.fileName || s.file} • {s.column}
                 <button
                   onClick={() => onRemoveSeries?.(s.id)}
                   className="text-gray-400 hover:text-red-400 transition-colors"
@@ -529,7 +546,7 @@ const Chart = ({
 
 
     const series = seriesList.map((s, idx) => ({
-      name: s.name || `${s.file} • ${s.column}`,
+      name: s.name || `${s.fileName || s.file} • ${s.column}`,
       type: "line",
       symbol: "none",
       sampling: "lttb",
