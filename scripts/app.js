@@ -535,13 +535,12 @@ const App = () => {
             }));
       return (
         <div key={node.id} className="flex-1 min-w-0">
-	          <PlotPanel
-	            title={plotTitleMap[plot.id] || "Plot"}
-	            plotId={plot.id}
-	            series={seriesData}
-	            viewRange={currentRange || timeRange}
-	            fullTimeRange={timeRange}
-	            onZoom={handleZoom}
+          <PlotPanel
+            title={plotTitleMap[plot.id] || "Plot"}
+            series={seriesData}
+            viewRange={currentRange || timeRange}
+            fullTimeRange={timeRange}
+            onZoom={handleZoom}
 	            resetToken={resetToken}
             loading={plotLoading[plot.id]}
             onDropVariable={(col, zone) => handleVariableDrop(plot.id, col, zone)}

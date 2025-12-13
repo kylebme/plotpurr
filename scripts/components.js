@@ -325,7 +325,6 @@ const DropOverlay = ({ zone }) => {
 
 const PlotPanel = ({
   title,
-  plotId,
   series,
   viewRange,
   fullTimeRange,
