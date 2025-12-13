@@ -31,11 +31,7 @@ const App = () => {
   const [plotData, setPlotData] = useState({});
   const [plotStats, setPlotStats] = useState({});
   const [plotLoading, setPlotLoading] = useState({});
-  const [plotOverviewData, setPlotOverviewData] = useState({});
   const [resetToken, setResetToken] = useState(0);
-  const plotsRef = useRef(plots);
-  const overviewInFlightRef = useRef(new Set());
-  plotsRef.current = plots;
 
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingColumns, setLoadingColumns] = useState(false);
@@ -67,7 +63,6 @@ const App = () => {
     setPlotData({});
     setPlotStats({});
     setPlotLoading({});
-    setPlotOverviewData({});
     setFileFormats({});
     setTimeRange(null);
     setCurrentRange(null);
@@ -262,16 +257,6 @@ const App = () => {
         const queryTime = Math.round(performance.now() - queryStart);
 
         setPlotData((prev) => ({ ...prev, [plot.id]: filtered }));
-        // Preserve the first/complete-range fetch as the overview shown in the dataZoom mini map.
-        const isFullRangeFetch =
-          timeRange &&
-          currentRange &&
-          Math.abs(currentRange.start - timeRange.min) < 1e-6 &&
-          Math.abs(currentRange.end - timeRange.max) < 1e-6;
-        setPlotOverviewData((prev) => {
-          if (!isFullRangeFetch) return prev;
-          return { ...prev, [plot.id]: filtered };
-        });
         setPlotStats((prev) => ({
           ...prev,
           [plot.id]: {
@@ -290,68 +275,6 @@ const App = () => {
     [
       currentRange?.start,
       currentRange?.end,
-      timeRange?.min,
-      timeRange?.max,
-      settings.maxPoints,
-      settings.downsampleMethod,
-      columnsByFile,
-      fileFormats,
-    ]
-  );
-
-  const fetchOverviewForSeries = useCallback(
-    async (plotId, series) => {
-      if (!timeRange || timeRange.min == null || timeRange.max == null) return;
-      if (!series?.file || !series?.column || !series?.timeColumn || !series?.id) return;
-      const key = `${plotId}::${series.id}`;
-      if (overviewInFlightRef.current.has(key)) return;
-
-      overviewInFlightRef.current.add(key);
-      try {
-        const columnsMeta = columnsByFile[series.file];
-        if (!columnsMeta) return;
-        const result = await api.queryData({
-          file: series.file,
-          time_column: series.timeColumn,
-          value_columns: [series.column],
-          start_time: timeRange.min,
-          end_time: timeRange.max,
-          max_points: settings.maxPoints,
-          downsample_method: settings.downsampleMethod,
-          columnsMeta,
-          format: series.format || fileFormats[series.file],
-        });
-        const timeData = result.data?.[series.timeColumn] || [];
-        const valueData = result.data?.[series.column] || [];
-        const pairs = timeData.map((t, idx) => [t, valueData[idx]]);
-        const overviewSeries = {
-          ...series,
-          name: `${series.fileName || series.file} • ${series.column}`,
-          data: pairs,
-          totalPoints: result.total_points,
-          returnedPoints: result.returned_points,
-          downsampled: result.downsampled,
-        };
-
-        setPlotOverviewData((prev) => {
-          const plot = plotsRef.current.find((p) => p.id === plotId);
-          if (!plot) return prev;
-          if (!plot.series.some((s) => s.id === series.id)) return prev;
-
-          const byId = new Map((prev[plotId] || []).map((s) => [s.id, s]));
-          byId.set(series.id, overviewSeries);
-          const ordered = plot.series.map((s) => byId.get(s.id)).filter(Boolean);
-          return { ...prev, [plotId]: ordered };
-        });
-      } catch (err) {
-        console.error("Error querying overview data for series", plotId, series, err);
-      } finally {
-        overviewInFlightRef.current.delete(key);
-      }
-    },
-    [
-      timeRange?.min,
-      timeRange?.max,
       settings.maxPoints,
       settings.downsampleMethod,
       columnsByFile,
@@ -369,11 +292,6 @@ const App = () => {
           delete next[plot.id];
           return next;
         });
-        setPlotOverviewData((prev) => {
-          const next = { ...prev };
-          delete next[plot.id];
-          return next;
-        });
         setPlotStats((prev) => {
           const next = { ...prev };
           delete next[plot.id];
@@ -384,39 +302,6 @@ const App = () => {
       fetchPlotData(plot);
     });
   }, [plots, currentRange?.start, currentRange?.end, fetchPlotData]);
-
-  useEffect(() => {
-    if (!timeRange || timeRange.min == null || timeRange.max == null) return;
-    if (!currentRange) return;
-    if (!plots.length) return;
-
-    const isAtFullRange =
-      Math.abs(currentRange.start - timeRange.min) < 1e-6 && Math.abs(currentRange.end - timeRange.max) < 1e-6;
-    if (isAtFullRange) return;
-
-    plots.forEach((plot) => {
-      if (!plot.series.length) return;
-      const existing = plotOverviewData[plot.id] || [];
-      const existingById = new Map(existing.map((s) => [s.id, s]));
-      plot.series.forEach((s) => {
-        const prevSeries = existingById.get(s.id);
-        const matches =
-          prevSeries &&
-          prevSeries.file === s.file &&
-          prevSeries.column === s.column &&
-          prevSeries.timeColumn === s.timeColumn;
-        if (!matches) fetchOverviewForSeries(plot.id, s);
-      });
-    });
-  }, [
-    plots,
-    plotOverviewData,
-    timeRange?.min,
-    timeRange?.max,
-    currentRange?.start,
-    currentRange?.end,
-    fetchOverviewForSeries,
-  ]);
 
   const handleZoom = useCallback((start, end) => {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return;
@@ -556,19 +441,6 @@ const App = () => {
         plot.id === plotId ? { ...plot, series: plot.series.filter((s) => s.id !== seriesId) } : plot
       )
     );
-    setPlotOverviewData((prev) => {
-      const existing = prev[plotId];
-      if (!existing) return prev;
-      const nextSeries = existing.filter((s) => s.id !== seriesId);
-      if (nextSeries.length === existing.length) return prev;
-      const next = { ...prev };
-      if (nextSeries.length) {
-        next[plotId] = nextSeries;
-      } else {
-        delete next[plotId];
-      }
-      return next;
-    });
   }, []);
 
   const handleRemovePlot = useCallback(
@@ -591,11 +463,6 @@ const App = () => {
         return next;
       });
       setPlotLoading((prev) => {
-        const next = { ...prev };
-        delete next[plotId];
-        return next;
-      });
-      setPlotOverviewData((prev) => {
         const next = { ...prev };
         delete next[plotId];
         return next;
@@ -668,15 +535,14 @@ const App = () => {
             }));
       return (
         <div key={node.id} className="flex-1 min-w-0">
-          <PlotPanel
-            title={plotTitleMap[plot.id] || "Plot"}
-            plotId={plot.id}
-            series={seriesData}
-            overviewSeries={plotOverviewData[plot.id]}
-            viewRange={currentRange || timeRange}
-            fullTimeRange={timeRange}
-            onZoom={handleZoom}
-            resetToken={resetToken}
+	          <PlotPanel
+	            title={plotTitleMap[plot.id] || "Plot"}
+	            plotId={plot.id}
+	            series={seriesData}
+	            viewRange={currentRange || timeRange}
+	            fullTimeRange={timeRange}
+	            onZoom={handleZoom}
+	            resetToken={resetToken}
             loading={plotLoading[plot.id]}
             onDropVariable={(col, zone) => handleVariableDrop(plot.id, col, zone)}
             onRemoveSeries={(seriesId) => handleRemoveColumn(plot.id, seriesId)}

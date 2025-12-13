@@ -327,7 +327,6 @@ const PlotPanel = ({
   title,
   plotId,
   series,
-  overviewSeries,
   viewRange,
   fullTimeRange,
   onZoom,
@@ -426,7 +425,6 @@ const PlotPanel = ({
         {series.length > 0 ? (
           <Chart
             seriesList={series}
-            overviewSeries={overviewSeries}
             onZoom={onZoom}
             loading={loading}
             viewRange={viewRange}
@@ -453,7 +451,6 @@ const PlotPanel = ({
 
 const Chart = ({
   seriesList = [],
-  overviewSeries = [],
   onZoom,
   loading,
   viewRange,
@@ -573,26 +570,6 @@ const Chart = ({
       },
     }));
 
-    const overviewById = new Map((overviewSeries || []).map((s) => [s.id, s]));
-    // Keep a hidden copy of the original full-range data so the dataZoom shadow stays as a bird's eye view.
-    const shadowSeries = seriesList.map((s, idx) => {
-      const src = (s && s.id && overviewById.get(s.id)) || s;
-      return {
-      id: `overview-${s?.id || idx}`,
-      name: "",
-      type: "line",
-      symbol: "none",
-      data: src?.data || [],
-      silent: true,
-      tooltip: { show: false },
-      lineStyle: { opacity: 0, width: 0 },
-      itemStyle: { opacity: 0 },
-      emphasis: { disabled: true },
-      animation: false,
-      z: -20,
-      };
-    });
-
     const tooltip = showTooltip
       ? {
           show: true,
@@ -637,7 +614,7 @@ const Chart = ({
         top: 60,
         left: 60,
         right: 40,
-        bottom: 80,
+        bottom: 60,
       },
       xAxis: {
         type: "value",
@@ -703,26 +680,6 @@ const Chart = ({
           moveOnMouseMove: interactionMode === "pan" && !shiftDown,
         },
         {
-          id: "x-slider",
-          type: "slider",
-          xAxisIndex: 0,
-          filterMode: "none",
-          bottom: 20,
-          height: 30,
-          borderColor: "#374151",
-          backgroundColor: "#1f2937",
-          fillerColor: "rgba(59, 130, 246, 0.2)",
-          handleStyle: {
-            color: "#3b82f6",
-          },
-          textStyle: {
-            color: "#9ca3af",
-          },
-          brushSelect: false,
-          startValue: rangeStart,
-          endValue: rangeEnd,
-        },
-        {
           id: "y-inside",
           type: "inside",
           yAxisIndex: 0,
@@ -733,7 +690,7 @@ const Chart = ({
           moveOnMouseMove: interactionMode === "pan" && shiftDown,
         },
       ],
-      series: [...shadowSeries, ...displaySeries],
+      series: displaySeries,
       color: COLORS,
       toolbox: {
         show: false,
@@ -778,12 +735,6 @@ const Chart = ({
           startValue: minX,
           endValue: maxX,
         });
-        chartInstance.current?.dispatchAction({
-          type: "dataZoom",
-          dataZoomId: "x-slider",
-          startValue: minX,
-          endValue: maxX,
-        });
         if (minY != null && maxY != null && minY !== maxY) {
           chartInstance.current?.dispatchAction({
             type: "dataZoom",
@@ -795,7 +746,7 @@ const Chart = ({
         chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
       });
     }
-  }, [seriesList, overviewSeries, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
+  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -937,12 +888,6 @@ const Chart = ({
           chartInstance.current.dispatchAction({
             type: "dataZoom",
             dataZoomId: "x-inside",
-            startValue: newMin,
-            endValue: newMax,
-          });
-          chartInstance.current.dispatchAction({
-            type: "dataZoom",
-            dataZoomId: "x-slider",
             startValue: newMin,
             endValue: newMax,
           });
