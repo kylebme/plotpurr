@@ -149,16 +149,19 @@ const Utils = (() => {
   function buildMinMaxQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = Math.floor(maxPoints / 2);
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
-
-    let timeOutput;
-    let timeOrder;
-    if (isTimestamp) {
-      timeOutput = `toUnixTimestamp(\`${timeCol}\`) as \`${timeCol}\``;
-      timeOrder = `\`${timeCol}\``;
-    } else {
-      timeOutput = `\`${timeCol}\``;
-      timeOrder = `\`${timeCol}\``;
+    const primaryValueCol = valueCols?.[0];
+    if (!primaryValueCol) {
+      return `
+        SELECT \`${timeCol}\`
+        FROM ${source}
+        ${whereSql}
+        ORDER BY \`${timeCol}\`
+        LIMIT ${maxPoints}
+      `;
     }
+
+    const timeOrder = `\`${timeCol}\``;
+    const timeOutExpr = isTimestamp ? `toUnixTimestamp(t_raw)` : `t_raw`;
 
     return `
       WITH numbered AS (
@@ -176,17 +179,19 @@ const Utils = (() => {
           FLOOR((rn - 1) * CAST(${numBuckets} AS Float64) / NULLIF(total, 0)) as bucket
         FROM numbered
       ),
-      first_points AS (
-        SELECT 
+      ranked AS (
+        SELECT
           bucket,
-          ${timeOutput},
+          \`${timeCol}\` as t_raw,
+          ${timeOutExpr} as \`${timeCol}\`,
           ${valueSelects},
-          ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${timeCol}\`) as pos
+          ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${primaryValueCol}\` ASC, t_raw) as rmin,
+          ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${primaryValueCol}\` DESC, t_raw) as rmax
         FROM bucketed
       )
       SELECT \`${timeCol}\`, ${valueSelects}
-      FROM first_points
-      WHERE pos = 1
+      FROM ranked
+      WHERE rmin = 1 OR rmax = 1
       ORDER BY \`${timeCol}\`
     `;
   }

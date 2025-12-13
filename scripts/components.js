@@ -388,6 +388,8 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   const [showLoader, setShowLoader] = useState(false);
   const loaderTimerRef = useRef(null);
   const lastZoomRef = useRef({ start: null, end: null });
+  const xLockRef = useRef(null);
+  const yLockRef = useRef(null);
   const isUpdatingScale = useRef(false);
   const shiftDownRef = useRef(false);
   const xDomainRef = useRef({ min: null, max: null });
@@ -419,6 +421,10 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
 
   // Convert series data to uPlot format
   const uplotData = useMemo(() => toUPlotData(seriesList), [seriesList]);
+  const seriesKey = useMemo(
+    () => (seriesList || []).map((s) => s?.id ?? `${s?.file ?? ""}::${s?.column ?? ""}::${s?.timeColumn ?? ""}`).join("|"),
+    [seriesList]
+  );
 
   // Compute domain bounds
   const domainStart = fullTimeRange?.min ?? fullTimeRange?.start ?? viewRange?.min ?? viewRange?.start;
@@ -458,7 +464,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         spanGaps: false,
       })),
     ];
-  }, [seriesList, getColor]);
+  }, [seriesKey, getColor]);
 
   // Create/destroy uPlot instance
   useEffect(() => {
@@ -488,6 +494,15 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         x: {
           time: false, // We're using Unix timestamps directly
           range: (u, min, max) => {
+            const lockedX = xLockRef.current;
+            if (
+              lockedX &&
+              Number.isFinite(lockedX.min) &&
+              Number.isFinite(lockedX.max) &&
+              lockedX.min !== lockedX.max
+            ) {
+              return [lockedX.min, lockedX.max];
+            }
             // Use current view range if available
             const rMin = rangeStart ?? min;
             const rMax = rangeEnd ?? max;
@@ -497,6 +512,15 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         y: {
           auto: true,
           range: (u, min, max) => {
+            const lockedY = yLockRef.current;
+            if (
+              lockedY &&
+              Number.isFinite(lockedY.min) &&
+              Number.isFinite(lockedY.max) &&
+              lockedY.min !== lockedY.max
+            ) {
+              return [lockedY.min, lockedY.max];
+            }
             if (min === max) {
               return [min - 1, max + 1];
             }
@@ -556,12 +580,36 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
               const minX = Math.min(xMin, xMax);
               const maxX = Math.max(xMin, xMax);
 
-              if (Number.isFinite(minX) && Number.isFinite(maxX) && minX !== maxX) {
-                isUpdatingScale.current = true;
-                u.setScale("x", { min: minX, max: maxX });
-                isUpdatingScale.current = false;
+              const y1 = u.posToVal(top, "y");
+              const y2 = u.posToVal(top + height, "y");
+              const minY = Math.min(y1, y2);
+              const maxY = Math.max(y1, y2);
 
-                debouncedZoom(minX, maxX);
+              const canZoomX = Number.isFinite(minX) && Number.isFinite(maxX) && minX !== maxX;
+              const canZoomY = height > 0 && Number.isFinite(minY) && Number.isFinite(maxY) && minY !== maxY;
+
+              if (canZoomX || canZoomY) {
+                isUpdatingScale.current = true;
+                const applyScales = () => {
+                  if (canZoomX) {
+                    xLockRef.current = { min: minX, max: maxX };
+                    u.setScale("x", { min: minX, max: maxX });
+                  }
+                  if (canZoomY) {
+                    yLockRef.current = { min: minY, max: maxY };
+                    u.setScale("y", { min: minY, max: maxY });
+                  }
+                };
+
+                if (typeof u.batch === "function") {
+                  u.batch(applyScales);
+                } else {
+                  applyScales();
+                }
+                isUpdatingScale.current = false;
+                u.redraw?.();
+
+                if (canZoomX) debouncedZoom(minX, maxX);
               }
 
               // Clear selection
@@ -696,6 +744,13 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
                 }
               }
 
+              if (axis === "x") {
+                xLockRef.current = { min: newMin, max: newMax };
+              }
+              if (axis === "y") {
+                yLockRef.current = { min: newMin, max: newMax };
+              }
+
               isUpdatingScale.current = true;
               u.setScale(axis, { min: newMin, max: newMax });
               isUpdatingScale.current = false;
@@ -752,6 +807,8 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
                   newMin = newMax - range;
                 }
 
+                xLockRef.current = { min: newMin, max: newMax };
+
                 isUpdatingScale.current = true;
                 u.setScale("x", { min: newMin, max: newMax });
                 isUpdatingScale.current = false;
@@ -763,6 +820,8 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
 
                 const newMin = panStart.current.yMin + deltaUnits;
                 const newMax = panStart.current.yMax + deltaUnits;
+
+                yLockRef.current = { min: newMin, max: newMax };
 
                 isUpdatingScale.current = true;
                 u.setScale("y", { min: newMin, max: newMax });
@@ -800,10 +859,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
       },
     };
 
-    // Only create chart if we have data
-    if (uplotData[0]?.length > 0) {
-      uplotRef.current = new uPlot(opts, uplotData, containerRef.current);
-    }
+    uplotRef.current = new uPlot(opts, uplotData, containerRef.current);
 
     // Resize observer
     const resizeObserver = new ResizeObserver(() => {
@@ -823,13 +879,12 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
         uplotRef.current = null;
       }
     };
-  }, [seriesConfig, interactionMode]);
+  }, [seriesKey, interactionMode]);
 
   // Update data when it changes
   useEffect(() => {
-    if (uplotRef.current && uplotData[0]?.length > 0) {
-      uplotRef.current.setData(uplotData);
-    }
+    if (!uplotRef.current) return;
+    uplotRef.current.setData(uplotData);
   }, [uplotData]);
 
   // Sync external range changes
@@ -844,6 +899,7 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
       Math.abs((current.min ?? 0) - rangeStart) > tolerance ||
       Math.abs((current.max ?? 0) - rangeEnd) > tolerance
     ) {
+      xLockRef.current = { min: rangeStart, max: rangeEnd };
       isUpdatingScale.current = true;
       uplotRef.current.setScale("x", { min: rangeStart, max: rangeEnd });
       isUpdatingScale.current = false;
@@ -853,6 +909,9 @@ const Chart = ({ seriesList = [], onZoom, loading, viewRange, fullTimeRange, get
   // Reset Y axis when resetToken changes
   useEffect(() => {
     if (!uplotRef.current || resetToken === undefined) return;
+
+    xLockRef.current = null;
+    yLockRef.current = null;
 
     // Force Y axis to auto-range by clearing and setting data
     const data = uplotRef.current.data;
