@@ -552,6 +552,7 @@ const Chart = ({
 
 
     const displaySeries = seriesList.map((s, idx) => ({
+      id: s.id || `series-${idx}`,
       name: s.name || `${s.file} • ${s.column}`,
       type: "line",
       symbol: "none",
@@ -572,14 +573,16 @@ const Chart = ({
       },
     }));
 
-    const shadowSource = overviewSeries && overviewSeries.length ? overviewSeries : seriesList;
+    const overviewById = new Map((overviewSeries || []).map((s) => [s.id, s]));
     // Keep a hidden copy of the original full-range data so the dataZoom shadow stays as a bird's eye view.
-    const shadowSeries = shadowSource.map((s, idx) => ({
-      id: `overview-${s.id || idx}`,
+    const shadowSeries = seriesList.map((s, idx) => {
+      const src = (s && s.id && overviewById.get(s.id)) || s;
+      return {
+      id: `overview-${s?.id || idx}`,
       name: "",
       type: "line",
       symbol: "none",
-      data: s.data || [],
+      data: src?.data || [],
       silent: true,
       tooltip: { show: false },
       lineStyle: { opacity: 0, width: 0 },
@@ -587,7 +590,8 @@ const Chart = ({
       emphasis: { disabled: true },
       animation: false,
       z: -20,
-    }));
+      };
+    });
 
     const tooltip = showTooltip
       ? {
