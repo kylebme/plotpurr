@@ -1,4 +1,4 @@
-const { formatBytes, formatNumber, debounce, COLORS } = window.Utils;
+const { formatBytes, formatNumber, COLORS } = window.Utils;
 const { useEffect, useRef, useState, useCallback } = React;
 
 const Spinner = () => (
@@ -326,6 +326,8 @@ const DropOverlay = ({ zone }) => {
 const PlotPanel = ({
   title,
   series,
+  minimapSeries,
+  minimapLoading,
   viewRange,
   fullTimeRange,
   onZoom,
@@ -422,16 +424,25 @@ const PlotPanel = ({
         className="relative min-h-[360px]"
       >
         {series.length > 0 ? (
-          <Chart
-            seriesList={series}
-            onZoom={onZoom}
-            loading={loading}
-            viewRange={viewRange}
-            fullTimeRange={fullTimeRange}
-            getColor={getColor}
-            resetToken={resetToken}
-            showTooltip={showTooltip}
-          />
+          <div className="flex flex-col gap-2">
+            <Chart
+              seriesList={series}
+              onZoom={onZoom}
+              loading={loading}
+              viewRange={viewRange}
+              fullTimeRange={fullTimeRange}
+              getColor={getColor}
+              resetToken={resetToken}
+              showTooltip={showTooltip}
+            />
+            <MinimapChart
+              seriesList={minimapSeries || series}
+              loading={!!minimapLoading}
+              viewRange={viewRange}
+              fullTimeRange={fullTimeRange}
+              getColor={getColor}
+            />
+          </div>
         ) : (
           <div className="h-[360px] flex flex-col items-center justify-center text-gray-500 gap-2">
             <svg className="w-12 h-12 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -444,6 +455,153 @@ const PlotPanel = ({
 
         {dragging && <DropOverlay zone={dropZone || "center"} />}
       </div>
+    </div>
+  );
+};
+
+const MinimapChart = ({ seriesList = [], loading, viewRange, fullTimeRange, getColor }) => {
+  const chartRef = useRef(null);
+  const chartInstance = useRef(null);
+  const firstSeriesIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    chartInstance.current = echarts.init(chartRef.current, "dark");
+    chartInstance.current.getZr?.().setSilent?.(true);
+
+    const resizeObserver = new ResizeObserver(() => {
+      chartInstance.current?.resize();
+    });
+    resizeObserver.observe(chartRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+      chartInstance.current?.dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chartInstance.current) return;
+
+    const domainStart = fullTimeRange?.min ?? fullTimeRange?.start;
+    const domainEnd = fullTimeRange?.max ?? fullTimeRange?.end;
+
+    firstSeriesIdRef.current = null;
+    const displaySeries = (seriesList || []).map((s, idx) => {
+      const id = `${s.id || `minimap-series-${idx}`}-minimap`;
+      if (idx === 0) firstSeriesIdRef.current = id;
+      return {
+        id,
+        name: s.name || `${s.file} • ${s.column}`,
+        type: "line",
+        symbol: "none",
+        sampling: "lttb",
+        data: s.data || [],
+        silent: true,
+        lineStyle: {
+          width: 1,
+          opacity: 0.9,
+          color: getColor?.(s, idx),
+        },
+        emphasis: { disabled: true },
+        itemStyle: { color: getColor?.(s, idx) },
+      };
+    });
+
+    const option = {
+      backgroundColor: "transparent",
+      animation: false,
+      tooltip: { show: false, trigger: "none" },
+      legend: { show: false },
+      grid: {
+        top: 6,
+        left: 12,
+        right: 12,
+        bottom: 18,
+      },
+      xAxis: {
+        type: "value",
+        min: Number.isFinite(domainStart) ? domainStart : undefined,
+        max: Number.isFinite(domainEnd) ? domainEnd : undefined,
+        axisLabel: {
+          show: true,
+          color: "#6b7280",
+          fontSize: 10,
+          formatter: (val) => {
+            const date = new Date(val * 1000);
+            return date.toISOString().substr(11, 8);
+          },
+        },
+        axisLine: { lineStyle: { color: "#374151" } },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisPointer: { show: false },
+      },
+      yAxis: {
+        type: "value",
+        axisLabel: { show: false },
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisPointer: { show: false },
+      },
+      series: displaySeries,
+    };
+
+    chartInstance.current.setOption(option, { notMerge: true });
+  }, [seriesList, fullTimeRange, getColor]);
+
+  useEffect(() => {
+    if (!chartInstance.current) return;
+    const firstSeriesId = firstSeriesIdRef.current;
+    if (!firstSeriesId) return;
+
+    const viewStart = viewRange?.start ?? viewRange?.min ?? null;
+    const viewEnd = viewRange?.end ?? viewRange?.max ?? null;
+
+    const markAreaData =
+      Number.isFinite(viewStart) && Number.isFinite(viewEnd) && viewStart !== viewEnd
+        ? [
+            [
+              { xAxis: Math.min(viewStart, viewEnd), yAxis: "min" },
+              { xAxis: Math.max(viewStart, viewEnd), yAxis: "max" },
+            ],
+          ]
+        : [];
+
+    chartInstance.current.setOption(
+      {
+        series: [
+          {
+            id: firstSeriesId,
+            markArea: {
+              silent: true,
+              itemStyle: {
+                color: "rgba(59, 130, 246, 0.15)",
+                borderColor: "#3b82f6",
+                borderWidth: 1,
+              },
+              data: markAreaData,
+            },
+          },
+        ],
+      },
+      { notMerge: false }
+    );
+  }, [viewRange, seriesList]);
+
+  return (
+    <div className="relative bg-gray-800/40 rounded-lg border border-gray-700/60 overflow-hidden">
+      {loading && (
+        <div className="absolute inset-0 bg-gray-900/50 flex items-center justify-center z-10">
+          <div className="flex items-center gap-2 text-xs text-gray-200">
+            <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }}></div>
+            <span>Loading overview…</span>
+          </div>
+        </div>
+      )}
+      <div ref={chartRef} className="w-full h-[45px] pointer-events-none"></div>
     </div>
   );
 };
@@ -469,9 +627,12 @@ const Chart = ({
   const [showLoader, setShowLoader] = useState(false);
   const loaderTimerRef = useRef(null);
   const lastZoomRef = useRef({ start: null, end: null });
+  const viewRangeFromChartRef = useRef(false);
+  const zoomRafRef = useRef(null);
+  const pendingZoomExtentRef = useRef(null);
 
   const emitZoom = useCallback(
-    (start, end) => {
+    (start, end, options = {}) => {
       if (!Number.isFinite(start) || !Number.isFinite(end)) return;
       const nextStart = Math.min(start, end);
       const nextEnd = Math.max(start, end);
@@ -486,7 +647,8 @@ const Chart = ({
       }
 
       lastZoomRef.current = { start: nextStart, end: nextEnd };
-      onZoom?.(nextStart, nextEnd);
+      if (onZoom) viewRangeFromChartRef.current = true;
+      onZoom?.(nextStart, nextEnd, options);
     },
     [onZoom]
   );
@@ -520,8 +682,6 @@ const Chart = ({
 
     const domainStart = fullTimeRange?.min ?? fullTimeRange?.start ?? viewRange?.min ?? viewRange?.start;
     const domainEnd = fullTimeRange?.max ?? fullTimeRange?.end ?? viewRange?.max ?? viewRange?.end;
-    const rangeStart = viewRange?.start ?? viewRange?.min ?? domainStart;
-    const rangeEnd = viewRange?.end ?? viewRange?.max ?? domainEnd;
     xDomainRef.current = { min: domainStart, max: domainEnd };
     // Compute vertical data domain from series
     let yMin = Infinity;
@@ -672,8 +832,6 @@ const Chart = ({
           xAxisIndex: 0,
           filterMode: "none",
           throttle: 100,
-          startValue: rangeStart,
-          endValue: rangeEnd,
           zoomOnMouseWheel: false,
           moveOnMouseWheel: false,
           moveOnMouseMove: interactionMode === "pan" && !shiftDown,
@@ -701,19 +859,52 @@ const Chart = ({
     isZooming.current = false;
 
     chartInstance.current.off("datazoom");
-    chartInstance.current.on(
-      "datazoom",
-      debounce(() => {
-        if (isZooming.current) return;
-        const model = chartInstance.current?.getModel();
-        if (!model) return;
-        const xAxis = model.getComponent("xAxis", 0);
-        const extent = xAxis?.axis?.scale?.getExtent?.() || [];
-        if (extent[0] !== undefined && extent[1] !== undefined && isFinite(extent[0]) && isFinite(extent[1])) {
-          emitZoom(extent[0], extent[1]);
+    chartInstance.current.on("datazoom", (params) => {
+      if (isZooming.current) return;
+
+      const batch = params?.batch?.[0] || {};
+      const dataZoomId = batch.dataZoomId || params?.dataZoomId;
+      if (dataZoomId && dataZoomId !== "x-inside") return;
+      const domainMin = xDomainRef.current?.min;
+      const domainMax = xDomainRef.current?.max;
+
+      let startValue = batch.startValue;
+      let endValue = batch.endValue;
+
+      if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) {
+        if (
+          Number.isFinite(batch.start) &&
+          Number.isFinite(batch.end) &&
+          Number.isFinite(domainMin) &&
+          Number.isFinite(domainMax) &&
+          domainMin !== domainMax
+        ) {
+          const span = domainMax - domainMin;
+          startValue = domainMin + (span * batch.start) / 100;
+          endValue = domainMin + (span * batch.end) / 100;
         }
-      }, 300)
-    );
+      }
+
+      if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) {
+        const model = chartInstance.current?.getModel();
+        const xAxis = model?.getComponent?.("xAxis", 0);
+        const extent = xAxis?.axis?.scale?.getExtent?.() || [];
+        startValue = extent?.[0];
+        endValue = extent?.[1];
+      }
+
+      if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) return;
+
+      pendingZoomExtentRef.current = [startValue, endValue];
+      if (zoomRafRef.current != null) return;
+      zoomRafRef.current = requestAnimationFrame(() => {
+        zoomRafRef.current = null;
+        const next = pendingZoomExtentRef.current || [];
+        const a = next[0];
+        const b = next[1];
+        if (Number.isFinite(a) && Number.isFinite(b)) emitZoom(a, b, { immediate: false, kind: "scroll" });
+      });
+    });
 
     chartInstance.current.off("brushEnd");
     if (interactionMode === "box") {
@@ -728,24 +919,67 @@ const Chart = ({
         const maxX = Math.max(xStart, xEnd);
         const minY = isFinite(yStart) && isFinite(yEnd) ? Math.min(yStart, yEnd) : null;
         const maxY = isFinite(yStart) && isFinite(yEnd) ? Math.max(yStart, yEnd) : null;
+        isZooming.current = true;
         chartInstance.current?.dispatchAction({
           type: "dataZoom",
           dataZoomId: "x-inside",
           startValue: minX,
           endValue: maxX,
         });
+        isZooming.current = false;
+        emitZoom(minX, maxX, { immediate: true, kind: "box" });
         if (minY != null && maxY != null && minY !== maxY) {
+          isZooming.current = true;
           chartInstance.current?.dispatchAction({
             type: "dataZoom",
             dataZoomId: "y-inside",
             startValue: minY,
             endValue: maxY,
           });
+          isZooming.current = false;
         }
         chartInstance.current?.dispatchAction({ type: "brush", areas: [] });
       });
     }
-  }, [seriesList, viewRange, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
+    return () => {
+      if (zoomRafRef.current != null) {
+        cancelAnimationFrame(zoomRafRef.current);
+        zoomRafRef.current = null;
+      }
+    };
+  }, [seriesList, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
+
+  useEffect(() => {
+    if (!chartInstance.current || !viewRange) return;
+    if (viewRangeFromChartRef.current) {
+      viewRangeFromChartRef.current = false;
+      return;
+    }
+
+    const domainStart = fullTimeRange?.min ?? fullTimeRange?.start ?? viewRange?.min ?? viewRange?.start;
+    const domainEnd = fullTimeRange?.max ?? fullTimeRange?.end ?? viewRange?.max ?? viewRange?.end;
+    const start = viewRange?.start ?? viewRange?.min ?? domainStart;
+    const end = viewRange?.end ?? viewRange?.max ?? domainEnd;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start === end) return;
+
+    isZooming.current = true;
+    chartInstance.current.dispatchAction({
+      type: "dataZoom",
+      dataZoomId: "x-inside",
+      startValue: Math.min(start, end),
+      endValue: Math.max(start, end),
+    });
+    isZooming.current = false;
+  }, [
+    viewRange?.start,
+    viewRange?.end,
+    viewRange?.min,
+    viewRange?.max,
+    fullTimeRange?.min,
+    fullTimeRange?.max,
+    fullTimeRange?.start,
+    fullTimeRange?.end,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {

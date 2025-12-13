@@ -26,17 +26,52 @@ const App = () => {
   const seriesCounterRef = useRef(1);
   const colorMapRef = useRef({});
   const initialPlotIdRef = useRef(`plot-${plotCounterRef.current++}`);
+  const plotFetchSeqRef = useRef({});
+  const skipFetchForPlotRef = useRef({});
   const [plots, setPlots] = useState([{ id: initialPlotIdRef.current, series: [] }]);
   const [layout, setLayout] = useState({ id: "layout-root", type: "plot", plotId: initialPlotIdRef.current });
   const [plotData, setPlotData] = useState({});
   const [plotStats, setPlotStats] = useState({});
   const [plotLoading, setPlotLoading] = useState({});
+  const [minimapData, setMinimapData] = useState({});
   const [resetToken, setResetToken] = useState(0);
+  const [fetchRange, setFetchRange] = useState(null);
 
   const [loadingFiles, setLoadingFiles] = useState(true);
   const [loadingColumns, setLoadingColumns] = useState(false);
   const browseFn = window.electronAPI?.selectDataPaths || window.electronAPI?.selectParquetPaths;
   const canBrowse = !!browseFn;
+  const zoomFetchTimerRef = useRef(null);
+  const plotsRef = useRef([]);
+  const fileFormatsRef = useRef({});
+  const minimapDataRef = useRef({});
+  const timeRangeRef = useRef(null);
+  const currentRangeRef = useRef(null);
+  const fetchRangeRef = useRef(null);
+
+  useEffect(() => {
+    plotsRef.current = plots || [];
+  }, [plots]);
+
+  useEffect(() => {
+    fileFormatsRef.current = fileFormats || {};
+  }, [fileFormats]);
+
+  useEffect(() => {
+    minimapDataRef.current = minimapData || {};
+  }, [minimapData]);
+
+  useEffect(() => {
+    timeRangeRef.current = timeRange;
+  }, [timeRange]);
+
+  useEffect(() => {
+    currentRangeRef.current = currentRange;
+  }, [currentRange]);
+
+  useEffect(() => {
+    fetchRangeRef.current = fetchRange;
+  }, [fetchRange]);
 
   const selectedFileKey = getFileKey(selectedFile);
   const activeColumns = selectedFileKey ? columnsByFile[selectedFileKey] || [] : [];
@@ -63,13 +98,20 @@ const App = () => {
     setPlotData({});
     setPlotStats({});
     setPlotLoading({});
+    setMinimapData({});
     setFileFormats({});
     setTimeRange(null);
     setCurrentRange(null);
+    setFetchRange(null);
     setSelectedFile(null);
     setColumnsByFile({});
     setTimeColumnsByFile({});
     setResetToken((t) => t + 1);
+
+    if (zoomFetchTimerRef.current) {
+      clearTimeout(zoomFetchTimerRef.current);
+      zoomFetchTimerRef.current = null;
+    }
   }, []);
 
   const loadFiles = useCallback(async () => {
@@ -170,6 +212,8 @@ const App = () => {
     if (allSeries.length === 0) {
       setTimeRange(null);
       setCurrentRange(null);
+      setFetchRange(null);
+      setMinimapData({});
     }
   }, [allSeries.length]);
 
@@ -182,6 +226,11 @@ const App = () => {
     const idx = colorMapRef.current[key];
     return COLORS[idx % COLORS.length];
   }, []);
+
+  const buildSeriesSig = useCallback(
+    (s) => `${s.file}::${s.timeColumn}::${s.column}::${s.format || fileFormats[s.file] || ""}`,
+    [fileFormats]
+  );
 
   const updateRangeForSeries = useCallback(
     async (series) => {
@@ -207,6 +256,10 @@ const App = () => {
           if (!prev) return { start: nextRange.min, end: nextRange.max };
           return { start: Math.min(prev.start, nextRange.min), end: Math.max(prev.end, nextRange.max) };
         });
+        setFetchRange((prev) => {
+          if (!prev) return { start: nextRange.min, end: nextRange.max };
+          return { start: Math.min(prev.start, nextRange.min), end: Math.max(prev.end, nextRange.max) };
+        });
       } catch (err) {
         console.error("Error loading time range for series", series, err);
       }
@@ -216,10 +269,42 @@ const App = () => {
 
   const fetchPlotData = useCallback(
     async (plot) => {
-      if (!currentRange || !plot.series.length) {
+      if (!fetchRange || !plot.series.length) {
         return;
       }
 
+      const start = fetchRange.start;
+      const end = fetchRange.end;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start === end) return;
+
+      const skip = !!skipFetchForPlotRef.current[plot.id];
+      if (skip) {
+        delete skipFetchForPlotRef.current[plot.id];
+        const isFullRequest =
+          timeRange &&
+          Number.isFinite(timeRange.min) &&
+          Number.isFinite(timeRange.max) &&
+          Math.abs(start - timeRange.min) < 1e-4 &&
+          Math.abs(end - timeRange.max) < 1e-4;
+
+        if (isFullRequest) {
+          const cache = minimapDataRef.current || {};
+          const cached = cache[plot.id] || [];
+          const formats = fileFormatsRef.current || {};
+          const sigSet = new Set(
+            cached
+              .filter((s) => (s.data || []).length)
+              .map((s) => `${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`)
+          );
+          const complete = plot.series.every((s) =>
+            sigSet.has(`${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`)
+          );
+          if (complete) return;
+        }
+      }
+
+      const seq = (plotFetchSeqRef.current[plot.id] || 0) + 1;
+      plotFetchSeqRef.current[plot.id] = seq;
       setPlotLoading((prev) => ({ ...prev, [plot.id]: true }));
       const queryStart = performance.now();
 
@@ -232,8 +317,8 @@ const App = () => {
               file: series.file,
               time_column: series.timeColumn,
               value_columns: [series.column],
-              start_time: currentRange.start,
-              end_time: currentRange.end,
+              start_time: start,
+              end_time: end,
               max_points: settings.maxPoints,
               downsample_method: settings.downsampleMethod,
               columnsMeta,
@@ -256,6 +341,8 @@ const App = () => {
         const filtered = results.filter(Boolean);
         const queryTime = Math.round(performance.now() - queryStart);
 
+        if (plotFetchSeqRef.current[plot.id] !== seq) return;
+
         setPlotData((prev) => ({ ...prev, [plot.id]: filtered }));
         setPlotStats((prev) => ({
           ...prev,
@@ -266,24 +353,59 @@ const App = () => {
             queryTime,
           },
         }));
+
+        const isFullRange =
+          timeRange &&
+          Number.isFinite(timeRange.min) &&
+          Number.isFinite(timeRange.max) &&
+          Math.abs(fetchRange.start - timeRange.min) < 1e-4 &&
+          Math.abs(fetchRange.end - timeRange.max) < 1e-4;
+
+        if (isFullRange) {
+          setMinimapData((prev) => {
+            if (plotFetchSeqRef.current[plot.id] !== seq) return prev;
+            const prevList = prev[plot.id] || [];
+            const bySig = {};
+            prevList.forEach((s) => {
+              const sig = `${s.file}::${s.timeColumn}::${s.column}::${s.format || fileFormats[s.file] || ""}`;
+              bySig[sig] = s;
+            });
+
+            let changed = false;
+            filtered.forEach((s) => {
+              const sig = `${s.file}::${s.timeColumn}::${s.column}::${s.format || fileFormats[s.file] || ""}`;
+              if (!bySig[sig]?.data?.length && (s.data || []).length) {
+                bySig[sig] = s;
+                changed = true;
+              }
+            });
+
+            if (!changed) return prev;
+            return { ...prev, [plot.id]: Object.values(bySig) };
+          });
+        }
       } catch (err) {
         console.error("Error querying data for plot", plot.id, err);
       } finally {
-        setPlotLoading((prev) => ({ ...prev, [plot.id]: false }));
+        if (plotFetchSeqRef.current[plot.id] === seq) {
+          setPlotLoading((prev) => ({ ...prev, [plot.id]: false }));
+        }
       }
     },
     [
-      currentRange?.start,
-      currentRange?.end,
+      fetchRange?.start,
+      fetchRange?.end,
       settings.maxPoints,
       settings.downsampleMethod,
       columnsByFile,
       fileFormats,
+      timeRange?.min,
+      timeRange?.max,
     ]
   );
 
   useEffect(() => {
-    if (!currentRange) return;
+    if (!fetchRange) return;
 
     plots.forEach((plot) => {
       if (plot.series.length === 0) {
@@ -297,17 +419,177 @@ const App = () => {
           delete next[plot.id];
           return next;
         });
+        setMinimapData((prev) => {
+          if (!(plot.id in prev)) return prev;
+          const next = { ...prev };
+          delete next[plot.id];
+          return next;
+        });
         return;
       }
       fetchPlotData(plot);
     });
-  }, [plots, currentRange?.start, currentRange?.end, fetchPlotData]);
+  }, [plots, fetchRange?.start, fetchRange?.end, fetchPlotData]);
 
-  const handleZoom = useCallback((start, end) => {
+  useEffect(() => {
+    const activePlotIds = new Set((plots || []).map((p) => p.id));
+    setMinimapData((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      Object.keys(next).forEach((id) => {
+        if (!activePlotIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      });
+      if (!changed) return prev;
+      return next;
+    });
+  }, [plots]);
+
+  const handleZoom = useCallback((start, end, options = {}) => {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return;
     const nextStart = Math.min(start, end);
     const nextEnd = Math.max(start, end);
     if (nextStart === nextEnd) return;
+
+    // If the user scroll-zooms back to (almost) full extent and we have full-range cache,
+    // snap to the cached full-range view (no fetch).
+    if (options.kind === "scroll") {
+      const tr = timeRangeRef.current;
+      if (tr && Number.isFinite(tr.min) && Number.isFinite(tr.max) && tr.max > tr.min) {
+        const span = tr.max - tr.min;
+        const edgeTol = span * 0.03;
+        const nearFull = nextStart <= tr.min + edgeTol && nextEnd >= tr.max - edgeTol;
+        if (nearFull) {
+          const cur = currentRangeRef.current;
+          const alreadyFull =
+            cur &&
+            Number.isFinite(cur.start) &&
+            Number.isFinite(cur.end) &&
+            Math.abs(cur.start - tr.min) < 1e-4 &&
+            Math.abs(cur.end - tr.max) < 1e-4;
+
+          const plotsSnapshot = plotsRef.current || [];
+          const cache = minimapDataRef.current || {};
+          const formats = fileFormatsRef.current || {};
+
+          const hasFullCacheForPlot = (plot) => {
+            if (!plot?.series?.length) return true;
+            const cached = cache[plot.id] || [];
+            const sigSet = new Set(
+              cached
+                .filter((s) => (s.data || []).length)
+                .map((s) => `${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`)
+            );
+            return plot.series.every(
+              (s) => sigSet.has(`${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`)
+            );
+          };
+
+          const canSnap = plotsSnapshot.every(hasFullCacheForPlot);
+
+          if (canSnap) {
+            if (zoomFetchTimerRef.current) {
+              clearTimeout(zoomFetchTimerRef.current);
+              zoomFetchTimerRef.current = null;
+            }
+
+            const full = { start: tr.min, end: tr.max };
+            const fr = fetchRangeRef.current;
+            const fetchAlreadyFull =
+              fr &&
+              Number.isFinite(fr.start) &&
+              Number.isFinite(fr.end) &&
+              Math.abs(fr.start - full.start) < 1e-4 &&
+              Math.abs(fr.end - full.end) < 1e-4;
+
+            if (alreadyFull && fetchAlreadyFull) return;
+
+            plotsSnapshot.forEach((plot) => {
+              if (!plot?.id) return;
+              plotFetchSeqRef.current[plot.id] = (plotFetchSeqRef.current[plot.id] || 0) + 1;
+            });
+            setPlotLoading((prev) => {
+              const next = { ...prev };
+              plotsSnapshot.forEach((plot) => {
+                if (plot?.id) next[plot.id] = false;
+              });
+              return next;
+            });
+
+            if (!fetchAlreadyFull) {
+              plotsSnapshot.forEach((plot) => {
+                if (plot?.id) skipFetchForPlotRef.current[plot.id] = true;
+              });
+              setFetchRange(full);
+            }
+
+            setCurrentRange(full);
+
+            setPlotData((prev) => {
+              const next = { ...prev };
+              plotsSnapshot.forEach((plot) => {
+                if (!plot?.id || !plot.series?.length) return;
+
+                const cachedList = cache[plot.id] || [];
+                const cachedBySig = {};
+                cachedList.forEach((s) => {
+                  const sig = `${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`;
+                  cachedBySig[sig] = s;
+                });
+
+                const prevList = prev[plot.id] || [];
+                const prevBySig = {};
+                prevList.forEach((s) => {
+                  const sig = `${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`;
+                  prevBySig[sig] = s;
+                });
+
+                next[plot.id] = plot.series.map((base) => {
+                  const sig = `${base.file}::${base.timeColumn}::${base.column}::${base.format || formats[base.file] || ""}`;
+                  const cachedSeries = cachedBySig[sig];
+                  const fallback = prevBySig[sig];
+                  const chosen = cachedSeries && (cachedSeries.data || []).length ? cachedSeries : fallback || base;
+                  return {
+                    ...base,
+                    ...chosen,
+                    name: chosen.name || `${base.fileName || base.file} • ${base.column}`,
+                    data: chosen.data || [],
+                  };
+                });
+              });
+              return next;
+            });
+
+            setPlotStats((prev) => {
+              const next = { ...prev };
+              plotsSnapshot.forEach((plot) => {
+                if (!plot?.id || !plot.series?.length) return;
+                const cachedList = cache[plot.id] || [];
+                const sigSet = new Set(
+                  plot.series.map((s) => `${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`)
+                );
+                const forPlot = cachedList.filter((s) =>
+                  sigSet.has(`${s.file}::${s.timeColumn}::${s.column}::${s.format || formats[s.file] || ""}`)
+                );
+                if (!forPlot.length) return;
+                next[plot.id] = {
+                  totalPoints: forPlot.reduce((sum, s) => sum + (s?.totalPoints || 0), 0),
+                  returnedPoints: forPlot.reduce((sum, s) => sum + (s?.returnedPoints || 0), 0),
+                  downsampled: forPlot.some((s) => s?.downsampled),
+                  queryTime: 0,
+                };
+              });
+              return next;
+            });
+
+            setResetToken((t) => t + 1);
+            return;
+          }
+        }
+      }
+    }
 
     setCurrentRange((prev) => {
       const tolerance = 1e-4;
@@ -316,6 +598,23 @@ const App = () => {
       }
       return { start: nextStart, end: nextEnd };
     });
+
+    const nextRange = { start: nextStart, end: nextEnd };
+    if (options.immediate) {
+      if (zoomFetchTimerRef.current) {
+        clearTimeout(zoomFetchTimerRef.current);
+        zoomFetchTimerRef.current = null;
+      }
+      setFetchRange(nextRange);
+      return;
+    }
+
+    const SCROLL_FETCH_DEBOUNCE_MS = 120;
+    if (zoomFetchTimerRef.current) clearTimeout(zoomFetchTimerRef.current);
+    zoomFetchTimerRef.current = setTimeout(() => {
+      zoomFetchTimerRef.current = null;
+      setFetchRange(nextRange);
+    }, SCROLL_FETCH_DEBOUNCE_MS);
   }, []);
 
   const addSeriesToPlot = useCallback(
@@ -520,6 +819,12 @@ const App = () => {
     return map;
   }, [plots]);
 
+  useEffect(() => {
+    return () => {
+      if (zoomFetchTimerRef.current) clearTimeout(zoomFetchTimerRef.current);
+    };
+  }, []);
+
   const renderLayout = (node) => {
     if (!node) return null;
     if (node.type === "plot") {
@@ -533,11 +838,27 @@ const App = () => {
               name: `${s.fileName || s.file} • ${s.column}`,
               data: [],
             }));
+
+      const minimapBySig = {};
+      (minimapData[plot.id] || []).forEach((s) => {
+        minimapBySig[buildSeriesSig(s)] = s;
+      });
+      const minimapSeries = plot.series.map((s) => {
+        const sig = buildSeriesSig(s);
+        const cached = minimapBySig[sig];
+        if (cached && (cached.data || []).length) return cached;
+        const live = seriesData.find((x) => x.id === s.id) || seriesData.find((x) => buildSeriesSig(x) === sig);
+        return live || { ...s, name: `${s.fileName || s.file} • ${s.column}`, data: [] };
+      });
+      const hasCachedAll = minimapSeries.every((s) => (s.data || []).length);
+
       return (
         <div key={node.id} className="flex-1 min-w-0">
           <PlotPanel
             title={plotTitleMap[plot.id] || "Plot"}
             series={seriesData}
+            minimapSeries={minimapSeries}
+            minimapLoading={plotLoading[plot.id] && !hasCachedAll}
             viewRange={currentRange || timeRange}
             fullTimeRange={timeRange}
             onZoom={handleZoom}
@@ -565,10 +886,96 @@ const App = () => {
 
   const handleResetZoom = () => {
     if (timeRange) {
+      if (zoomFetchTimerRef.current) {
+        clearTimeout(zoomFetchTimerRef.current);
+        zoomFetchTimerRef.current = null;
+      }
+      (plots || []).forEach((plot) => {
+        if (!plot?.id) return;
+        plotFetchSeqRef.current[plot.id] = (plotFetchSeqRef.current[plot.id] || 0) + 1;
+      });
+      setPlotLoading((prev) => {
+        const next = { ...prev };
+        (plots || []).forEach((plot) => {
+          if (plot?.id) next[plot.id] = false;
+        });
+        return next;
+      });
+
+      const full = { start: timeRange.min, end: timeRange.max };
+      const fr = fetchRangeRef.current;
+      const fetchAlreadyFull =
+        fr &&
+        Number.isFinite(fr.start) &&
+        Number.isFinite(fr.end) &&
+        Math.abs(fr.start - full.start) < 1e-4 &&
+        Math.abs(fr.end - full.end) < 1e-4;
+      if (!fetchAlreadyFull) {
+        (plots || []).forEach((plot) => {
+          if (plot?.id) skipFetchForPlotRef.current[plot.id] = true;
+        });
+        setFetchRange(full);
+      }
+
       setCurrentRange({
         start: timeRange.min,
         end: timeRange.max,
       });
+
+      setPlotData((prev) => {
+        const next = { ...prev };
+        (plots || []).forEach((plot) => {
+          if (!plot?.id || !plot.series?.length) return;
+
+          const cachedList = minimapData[plot.id] || [];
+          const cachedBySig = {};
+          cachedList.forEach((s) => {
+            cachedBySig[buildSeriesSig(s)] = s;
+          });
+
+          const prevList = prev[plot.id] || [];
+          const prevBySig = {};
+          prevList.forEach((s) => {
+            prevBySig[buildSeriesSig(s)] = s;
+          });
+
+          const merged = plot.series.map((base) => {
+            const sig = buildSeriesSig(base);
+            const cached = cachedBySig[sig];
+            const fallback = prevBySig[sig];
+            const chosen = cached && (cached.data || []).length ? cached : fallback || base;
+            return {
+              ...base,
+              ...chosen,
+              name: chosen.name || `${base.fileName || base.file} • ${base.column}`,
+              data: chosen.data || [],
+            };
+          });
+
+          next[plot.id] = merged;
+        });
+        return next;
+      });
+
+      setPlotStats((prev) => {
+        const next = { ...prev };
+        (plots || []).forEach((plot) => {
+          if (!plot?.id || !plot.series?.length) return;
+          const cachedList = minimapData[plot.id] || [];
+          if (!cachedList.length) return;
+          const sigSet = new Set(plot.series.map(buildSeriesSig));
+          const forPlot = cachedList.filter((s) => sigSet.has(buildSeriesSig(s)));
+          if (!forPlot.length) return;
+          next[plot.id] = {
+            totalPoints: forPlot.reduce((sum, s) => sum + (s?.totalPoints || 0), 0),
+            returnedPoints: forPlot.reduce((sum, s) => sum + (s?.returnedPoints || 0), 0),
+            downsampled: forPlot.some((s) => s?.downsampled),
+            queryTime: 0,
+          };
+        });
+        return next;
+      });
+
       setResetToken((t) => t + 1);
     }
   };
