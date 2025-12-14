@@ -1,7 +1,7 @@
 {
-  "name": "plotter-electron",
+  "name": "plotpurr",
   "version": "0.1.0",
-  "description": "Desktop wrapper for the ChDB-powered data file viewer.",
+  "description": "PlotPurr. Desktop wrapper for the ChDB-powered data file viewer.",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",

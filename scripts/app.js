@@ -995,17 +995,12 @@ const App = () => {
         <div className="max-w-screen-2xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <svg className="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"
+              <div className="bg-gray-200 rounded-lg p-1">
+                <img
+                  src="./PlotPurr.png"
+                  alt="PlotPurr"
+                  className="h-12 w-auto"
                 />
-              </svg>
-              <div>
-                <h1 className="text-xl font-bold text-white">Data File Viewer</h1>
-                <p className="text-xs text-gray-400">Powered by ChDB (ClickHouse)</p>
               </div>
             </div>
 
@@ -1086,7 +1081,7 @@ const App = () => {
       <footer className="bg-gray-800 border-t border-gray-700 py-3">
         <div className="max-w-screen-2xl mx-auto px-4">
           <div className="flex items-center justify-between text-sm text-gray-400">
-            <span>Data File Viewer v1.0.0</span>
+            <span>PlotPurr v0.1.0</span>
             <span>Extensible data visualization for large datasets</span>
           </div>
         </div>
