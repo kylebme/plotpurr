@@ -25,3 +25,8 @@ PlotPurr downsamples the input data using Clickhouse and dynamically fetches new
 ## Motivation
 
 Existing plotting GUI tools (PlotJuggler, Rerun) are excellent, but they focus on datasets that can fit in RAM, since they load the entire dataset. Additionally, there is a large set of tooling for dealing with large datasets (Clickhouse, DuckDB, Polars, etc), but they are just the backend. They still require you to write code to get data and plot it. Sometimes you just need to plot something to skim through it before diving deeper in another tool. I wanted a tool that gives you the ease of use of PlotJuggler for large datasets in parquet format.
+
+## Notes
+
+This is a very early project, but it seems to be working ok. Disclaimer: it was mostly written by AI.
+I have mostly tested it with parquet files, so other formats may not work as intended yet.
