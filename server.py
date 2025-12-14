@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """
+Copyright (C) 2025 Kyle Bartholomew
+
+This file is part of PlotPurr.
+
+PlotPurr is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+PlotPurr is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+You should have received a copy of the GNU General Public License along with PlotPurr. If not, see <https://www.gnu.org/licenses/>.
+
 Very thin ChDB (ClickHouse) backend:
 - Serves index.html and other static files from the current directory
 - Lists supported data files (parquet, csv, jsonl, etc.)
@@ -226,7 +235,9 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
 
         if params:
             # ChDB bindings currently do not accept positional parameters; ignore if present.
-            logger.warning("Query parameters were provided but are not supported with ChDB; ignoring.")
+            logger.warning(
+                "Query parameters were provided but are not supported with ChDB; ignoring."
+            )
 
         try:
             prepared_query = str(query).strip()
