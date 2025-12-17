@@ -184,6 +184,16 @@ const App = () => {
     [fileFormats]
   );
 
+  useEffect(() => {
+    if (loadingFiles) return;
+    if (!files.length) return;
+    const selectedKey = getFileKey(selectedFile);
+    const hasSelected = files.some((f) => getFileKey(f) === selectedKey);
+    if (files.length === 1 && (!selectedKey || !hasSelected)) {
+      setSelectedFile(files[0]);
+    }
+  }, [files, loadingFiles, selectedFile]);
+
   const loadColumnsForFile = useCallback(
     async (file) => {
       if (!file) return;
