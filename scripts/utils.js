@@ -90,39 +90,57 @@ const Utils = (() => {
     return null;
   }
 
-  function buildTimeFilter(timeColumn, startTime, endTime, isTimestamp) {
+  function buildTimeFilter(timeColumn, startTime, endTime, isTimestamp, timeUnit = "none") {
     const clauses = [];
+
+    // start/end are expressed in the selected timeUnit (seconds, ms, µs, ns).
+    const buildTimestampExpr = (v) => {
+      if (!isTimestamp) return v;
+      if (timeUnit === "unix_ms") return `toDateTime64(${v} / 1000, 3)`;
+      if (timeUnit === "unix_us") return `toDateTime64(${v} / 1e6, 6)`;
+      if (timeUnit === "unix_ns") return `toDateTime64(${v} / 1e9, 9)`;
+      return `toDateTime(${v})`; // seconds
+    };
 
     if (startTime != null) {
       const v = Number(startTime);
       if (Number.isFinite(v)) {
-        if (isTimestamp) {
-          clauses.push(`\`${timeColumn}\` >= toDateTime(${v})`);
-        } else {
-          clauses.push(`\`${timeColumn}\` >= ${v}`);
-        }
+        const bound = isTimestamp ? buildTimestampExpr(v) : v;
+        clauses.push(`\`${timeColumn}\` >= ${bound}`);
       }
     }
 
     if (endTime != null) {
       const v = Number(endTime);
       if (Number.isFinite(v)) {
-        if (isTimestamp) {
-          clauses.push(`\`${timeColumn}\` <= toDateTime(${v})`);
-        } else {
-          clauses.push(`\`${timeColumn}\` <= ${v}`);
-        }
+        const bound = isTimestamp ? buildTimestampExpr(v) : v;
+        clauses.push(`\`${timeColumn}\` <= ${bound}`);
       }
     }
 
     return clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   }
 
-  function getTimeSelectExpr(timeColumn, isTimestamp) {
-    if (isTimestamp) {
+  function getTimeSelectExpr(timeColumn, isTimestamp, timeUnit) {
+    // Always emit numeric seconds for timestamp columns (with sub-second precision when requested)
+    if (!isTimestamp) {
+      return `\`${timeColumn}\``;
+    }
+
+    if (!timeUnit || timeUnit === "none" || timeUnit === "unix_s") {
       return `toUnixTimestamp(\`${timeColumn}\`) as \`${timeColumn}\``;
     }
-    return `\`${timeColumn}\``;
+    if (timeUnit === "unix_ms") {
+      return `toUnixTimestamp64Milli(\`${timeColumn}\`) as \`${timeColumn}\``;
+    }
+    if (timeUnit === "unix_us") {
+      return `toUnixTimestamp64Micro(\`${timeColumn}\`) as \`${timeColumn}\``;
+    }
+    if (timeUnit === "unix_ns") {
+      return `toUnixTimestamp64Nano(\`${timeColumn}\`) as \`${timeColumn}\``;
+    }
+
+    return `toUnixTimestamp(\`${timeColumn}\`) as \`${timeColumn}\``;
   }
 
   function buildLttbQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {

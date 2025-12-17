@@ -78,7 +78,17 @@ const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
   </div>
 );
 
-const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColumnAdd, loading, activeColumns = [] }) => {
+const ColumnSelector = ({
+  file,
+  columns,
+  timeColumn,
+  timeUnit,
+  onTimeColumnChange,
+  onTimeUnitChange,
+  onColumnAdd,
+  loading,
+  activeColumns = [],
+}) => {
   const [yFilter, setYFilter] = useState("");
   const fileKey = file?.id || file?.path || file?.name;
   const temporalColumns = columns.filter((c) => c.category === "temporal" || c.category === "numeric");
@@ -119,20 +129,37 @@ const ColumnSelector = ({ file, columns, timeColumn, onTimeColumnChange, onColum
             </span>
             <span className="text-gray-400">row count: {formatNumber(file.row_count || 0)}</span>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">X-Axis (Time Column)</label>
-            <select
-              value={timeColumn || ""}
-              onChange={(e) => onTimeColumnChange(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">Select time column...</option>
-              {temporalColumns.map((col) => (
-                <option key={col.name} value={col.name}>
-                  {col.name} ({col.type})
-                </option>
-              ))}
-            </select>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">X-Axis (Time Column)</label>
+              <select
+                value={timeColumn || ""}
+                onChange={(e) => onTimeColumnChange(e.target.value)}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Select time column...</option>
+                {temporalColumns.map((col) => (
+                  <option key={col.name} value={col.name}>
+                    {col.name} ({col.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Time Axis Unit</label>
+              <select
+                value={timeUnit || "none"}
+                onChange={(e) => onTimeUnitChange?.(e.target.value)}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="none">None (indices)</option>
+                <option value="unix_s">Unix seconds</option>
+                <option value="unix_ms">Unix milliseconds</option>
+                <option value="unix_us">Unix microseconds</option>
+                <option value="unix_ns">Unix nanoseconds</option>
+              </select>
+            </div>
           </div>
 
           <div>
@@ -340,6 +367,7 @@ const PlotPanel = ({
   viewRange,
   fullTimeRange,
   onZoom,
+  timeUnit = "none",
   resetToken,
   loading,
   onDropVariable,
@@ -443,6 +471,7 @@ const PlotPanel = ({
               getColor={getColor}
               resetToken={resetToken}
               showTooltip={showTooltip}
+              timeUnit={timeUnit}
             />
             <MinimapChart
               seriesList={minimapSeries || series}
@@ -450,6 +479,7 @@ const PlotPanel = ({
               viewRange={viewRange}
               fullTimeRange={fullTimeRange}
               getColor={getColor}
+              timeUnit={timeUnit}
             />
           </div>
         ) : (
@@ -468,10 +498,21 @@ const PlotPanel = ({
   );
 };
 
-const MinimapChart = ({ seriesList = [], loading, viewRange, fullTimeRange, getColor }) => {
+const MinimapChart = ({ seriesList = [], loading, viewRange, fullTimeRange, getColor, timeUnit = "none" }) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
   const firstSeriesIdRef = useRef(null);
+  const toMsFactor =
+    timeUnit === "unix_ns" ? 1 / 1e6 : timeUnit === "unix_us" ? 1 / 1000 : timeUnit === "unix_ms" ? 1 : 1000;
+  const formatTimeLabel = useCallback(
+    (val) => {
+      if (!Number.isFinite(val)) return "";
+      if (timeUnit === "none") return `${val}`;
+      const date = new Date(val * toMsFactor);
+      return Number.isNaN(date.getTime()) ? `${val}` : date.toISOString();
+    },
+    [timeUnit, toMsFactor]
+  );
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -537,10 +578,7 @@ const MinimapChart = ({ seriesList = [], loading, viewRange, fullTimeRange, getC
           show: true,
           color: "#6b7280",
           fontSize: 10,
-          formatter: (val) => {
-            const date = new Date(val * 1000);
-            return date.toISOString().substr(11, 8);
-          },
+          formatter: (val) => formatTimeLabel(val),
         },
         axisLine: { lineStyle: { color: "#374151" } },
         axisTick: { show: false },
@@ -559,7 +597,7 @@ const MinimapChart = ({ seriesList = [], loading, viewRange, fullTimeRange, getC
     };
 
     chartInstance.current.setOption(option, { notMerge: true });
-  }, [seriesList, fullTimeRange, getColor]);
+  }, [seriesList, fullTimeRange, getColor, formatTimeLabel]);
 
   useEffect(() => {
     if (!chartInstance.current) return;
@@ -624,6 +662,7 @@ const Chart = ({
   getColor,
   resetToken,
   showTooltip = true,
+  timeUnit = "none",
 }) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
@@ -639,6 +678,29 @@ const Chart = ({
   const viewRangeFromChartRef = useRef(false);
   const zoomRafRef = useRef(null);
   const pendingZoomExtentRef = useRef(null);
+
+  const toMsFactor =
+    timeUnit === "unix_ns" ? 1 / 1e6 : timeUnit === "unix_us" ? 1 / 1000 : timeUnit === "unix_ms" ? 1 : 1000;
+
+  const formatAxisTick = useCallback(
+    (val) => {
+      if (!Number.isFinite(val)) return "";
+      if (timeUnit === "none") return `${val}`;
+      const date = new Date(val * toMsFactor);
+      return Number.isNaN(date.getTime()) ? `${val}` : date.toISOString().replace("T", " ").replace("Z", "");
+    },
+    [timeUnit, toMsFactor]
+  );
+
+  const formatTooltipTime = useCallback(
+    (val) => {
+      if (!Number.isFinite(val)) return "";
+      if (timeUnit === "none") return `${val}`;
+      const date = new Date(val * toMsFactor);
+      return Number.isNaN(date.getTime()) ? `${val}` : date.toISOString();
+    },
+    [timeUnit, toMsFactor]
+  );
 
   const emitZoom = useCallback(
     (start, end, options = {}) => {
@@ -749,8 +811,8 @@ const Chart = ({
           },
           formatter: (params) => {
             if (!params.length) return "";
-            const time = new Date(params[0].value[0] * 1000).toISOString();
-            let html = `<div class="font-semibold mb-2">${time}</div>`;
+            const timeLabel = formatTooltipTime(params[0].value[0]);
+            let html = `<div class="font-semibold mb-2">${timeLabel}</div>`;
             params.forEach((p) => {
               const value = p.value[1]?.toFixed(6) ?? "N/A";
               html += `<div class="flex justify-between gap-4">
@@ -789,10 +851,7 @@ const Chart = ({
         min: domainStart,
         max: domainEnd,
         axisLabel: {
-          formatter: (val) => {
-            const date = new Date(val * 1000);
-            return date.toISOString().substr(11, 8);
-          },
+          formatter: (val) => formatAxisTick(val),
           color: "#9ca3af",
         },
         axisLine: {
@@ -956,7 +1015,7 @@ const Chart = ({
         zoomRafRef.current = null;
       }
     };
-  }, [seriesList, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip]);
+  }, [seriesList, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip, formatAxisTick, formatTooltipTime]);
 
   useEffect(() => {
     if (!chartInstance.current || !viewRange) return;

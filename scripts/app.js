@@ -24,6 +24,7 @@ const App = () => {
   const [timeColumnsByFile, setTimeColumnsByFile] = useState({});
   const [timeRange, setTimeRange] = useState(null);
   const [currentRange, setCurrentRange] = useState(null);
+  const [timeUnit, setTimeUnit] = useState("none");
   const [settings, setSettings] = useState({
     maxPoints: 10000,
     downsampleMethod: "minmax",
@@ -253,7 +254,8 @@ const App = () => {
           series.timeColumn,
           timeColMeta.type,
           [series.column],
-          series.format || fileFormats[series.file]
+          series.format || fileFormats[series.file],
+          timeUnit
         );
         if (range.min_epoch == null || range.max_epoch == null) return;
         const nextRange = { min: range.min_epoch, max: range.max_epoch };
@@ -273,7 +275,7 @@ const App = () => {
         console.error("Error loading time range for series", series, err);
       }
     },
-    [columnsByFile, fileFormats]
+    [columnsByFile, fileFormats, timeUnit]
   );
 
   const fetchPlotData = useCallback(
@@ -332,6 +334,7 @@ const App = () => {
               downsample_method: settings.downsampleMethod,
               columnsMeta,
               format: series.format || fileFormats[series.file],
+              timeUnit,
             });
             const timeData = result.data?.[series.timeColumn] || [];
             const valueData = result.data?.[series.column] || [];
@@ -410,6 +413,7 @@ const App = () => {
       fileFormats,
       timeRange?.min,
       timeRange?.max,
+      timeUnit,
     ]
   );
 
@@ -809,6 +813,18 @@ const App = () => {
     [selectedFile, plots, updateRangeForSeries]
   );
 
+  const handleTimeUnitChange = useCallback(
+    (nextUnit) => {
+      setTimeUnit(nextUnit || "none");
+      if (!timeRange) return;
+      if (nextUnit === "none") {
+        // When switching to indices, keep current range but treat values as indices.
+        return;
+      }
+    },
+    [timeRange]
+  );
+
   const combinedStats = useMemo(() => {
     const entries = Object.values(plotStats || {});
     if (!entries.length) return {};
@@ -871,7 +887,8 @@ const App = () => {
             viewRange={currentRange || timeRange}
             fullTimeRange={timeRange}
             onZoom={handleZoom}
-	            resetToken={resetToken}
+            timeUnit={timeUnit}
+            resetToken={resetToken}
             loading={plotLoading[plot.id]}
             onDropVariable={(col, zone) => handleVariableDrop(plot.id, col, zone)}
             onRemoveSeries={(seriesId) => handleRemoveColumn(plot.id, seriesId)}
@@ -1032,7 +1049,9 @@ const App = () => {
               file={selectedFile}
               columns={activeColumns}
               timeColumn={activeTimeColumn}
+              timeUnit={timeUnit}
               onTimeColumnChange={handleTimeColumnChange}
+              onTimeUnitChange={handleTimeUnitChange}
               activeColumns={activeColumnsForFile}
               onColumnAdd={handleQuickAdd}
               loading={loadingColumns}
@@ -1064,12 +1083,48 @@ const App = () => {
                 <div className="flex items-center justify-between text-sm">
                   <div>
                     <span className="text-gray-400">Current Range: </span>
-                    <span className="font-mono">{new Date(currentRange.start * 1000).toISOString()}</span>
+                    <span className="font-mono">
+                      {timeUnit === "none"
+                        ? currentRange.start
+                        : new Date(
+                            timeUnit === "unix_s"
+                              ? currentRange.start * 1000
+                              : timeUnit === "unix_ms"
+                              ? currentRange.start
+                              : timeUnit === "unix_us"
+                              ? currentRange.start / 1000
+                              : currentRange.start / 1e6
+                          ).toISOString()}
+                    </span>
                     <span className="text-gray-500 mx-2">→</span>
-                    <span className="font-mono">{new Date(currentRange.end * 1000).toISOString()}</span>
+                    <span className="font-mono">
+                      {timeUnit === "none"
+                        ? currentRange.end
+                        : new Date(
+                            timeUnit === "unix_s"
+                              ? currentRange.end * 1000
+                              : timeUnit === "unix_ms"
+                              ? currentRange.end
+                              : timeUnit === "unix_us"
+                              ? currentRange.end / 1000
+                              : currentRange.end / 1e6
+                          ).toISOString()}
+                    </span>
                   </div>
                   <div className="text-gray-400">
-                    Duration: {((currentRange.end - currentRange.start) / 60).toFixed(2)} min
+                    <span className="text-gray-400">Duration: </span>
+                    {(() => {
+                      const delta = currentRange.end - currentRange.start;
+                      if (timeUnit === "none") {
+                        return `${delta} (indices)`;
+                      }
+                      let seconds;
+                      if (timeUnit === "unix_s") seconds = delta;
+                      else if (timeUnit === "unix_ms") seconds = delta / 1000;
+                      else if (timeUnit === "unix_us") seconds = delta / 1e6;
+                      else seconds = delta / 1e9;
+                      return `${(seconds / 60).toFixed(2)} min`;
+                    })()}
                   </div>
                 </div>
               </div>

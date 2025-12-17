@@ -140,7 +140,7 @@ const api = {
     });
   },
 
-  async getTimeRange(file, timeColumn, columnType, valueColumns = [], format) {
+  async getTimeRange(file, timeColumn, columnType, valueColumns = [], format, timeUnit = "none") {
     const isTs = isTimestampType(columnType);
     const nonNullFilter =
       valueColumns && valueColumns.length
@@ -149,7 +149,29 @@ const api = {
     const tableExpr = fileTable(file, format);
     let query;
 
-    if (isTs) {
+    if (isTs && timeUnit && timeUnit !== "none") {
+      let epochExpr;
+      if (timeUnit === "unix_s") {
+        epochExpr = `toUnixTimestamp(\`${timeColumn}\`)`;
+      } else if (timeUnit === "unix_ms") {
+        epochExpr = `toUnixTimestamp64Milli(\`${timeColumn}\`)`;
+      } else if (timeUnit === "unix_us") {
+        epochExpr = `toUnixTimestamp64Micro(\`${timeColumn}\`)`;
+      } else if (timeUnit === "unix_ns") {
+        epochExpr = `toUnixTimestamp64Nano(\`${timeColumn}\`)`;
+      } else {
+        epochExpr = `toUnixTimestamp(\`${timeColumn}\`)`;
+      }
+
+      query = `
+        SELECT 
+          MIN(${epochExpr}) AS min_epoch,
+          MAX(${epochExpr}) AS max_epoch,
+          COUNT(*) AS total_count
+        FROM ${tableExpr}
+        ${nonNullFilter}
+      `;
+    } else if (isTs) {
       query = `
         SELECT 
           MIN(\`${timeColumn}\`) AS min_time,
@@ -192,16 +214,26 @@ const api = {
     const idxMaxEpoch = cols.indexOf("max_epoch");
     const idxTotal = cols.indexOf("total_count");
 
-    const minVal = row[idxMin >= 0 ? idxMin : 0];
-    const maxVal = row[idxMax >= 0 ? idxMax : 1];
+    const minVal = idxMin >= 0 ? row[idxMin] : row[0];
+    const maxVal = idxMax >= 0 ? row[idxMax] : row[1];
     const totalCount = row[idxTotal >= 0 ? idxTotal : 2];
 
-    const minEpoch = isTs
-      ? row[idxMinEpoch >= 0 ? idxMinEpoch : idxMin >= 0 ? idxMin : 0]
-      : toEpoch(minVal);
-    const maxEpoch = isTs
-      ? row[idxMaxEpoch >= 0 ? idxMaxEpoch : idxMax >= 0 ? idxMax : 1]
-      : toEpoch(maxVal);
+    let minEpoch;
+    let maxEpoch;
+
+    if (isTs && timeUnit && timeUnit !== "none") {
+      const idxMinEp = cols.indexOf("min_epoch");
+      const idxMaxEp = cols.indexOf("max_epoch");
+      minEpoch = idxMinEp >= 0 ? row[idxMinEp] : null;
+      maxEpoch = idxMaxEp >= 0 ? row[idxMaxEp] : null;
+    } else {
+      minEpoch = isTs
+        ? row[idxMinEpoch >= 0 ? idxMinEpoch : idxMin >= 0 ? idxMin : 0]
+        : toEpoch(minVal);
+      maxEpoch = isTs
+        ? row[idxMaxEpoch >= 0 ? idxMaxEpoch : idxMax >= 0 ? idxMax : 1]
+        : toEpoch(maxVal);
+    }
 
     return {
       min: String(minVal),
@@ -224,6 +256,7 @@ const api = {
       downsample_method,
       columnsMeta,
       format,
+      timeUnit = "none",
     } = params;
 
     if (!file || !time_column || !value_columns?.length) {
@@ -248,7 +281,7 @@ const api = {
     }
 
     const isTs = isTimestampType(colType);
-    const whereSql = buildTimeFilter(time_column, start_time, end_time, isTs);
+    const whereSql = buildTimeFilter(time_column, start_time, end_time, isTs, timeUnit);
     const tableExpr = fileTable(file, format);
 
     const countQuery = `
@@ -263,7 +296,7 @@ const api = {
       countIndex >= 0 && countRow[countIndex] != null ? countRow[countIndex] : countRow[0] || 0;
 
     const valueColsSql = value_columns.map((c) => `\`${c}\``).join(", ");
-    const timeSelect = getTimeSelectExpr(time_column, isTs);
+    const timeSelect = getTimeSelectExpr(time_column, isTs, timeUnit);
 
     let dataRows = [];
     let downsampled = false;
