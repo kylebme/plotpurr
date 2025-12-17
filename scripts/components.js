@@ -842,7 +842,7 @@ const Chart = ({
         top: 60,
         left: 60,
         right: 40,
-        bottom: 60,
+        bottom: 32,
       },
       xAxis: {
         type: "value",
