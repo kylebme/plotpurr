@@ -790,10 +790,8 @@ const Chart = ({
         color: getColor?.(s, idx),
       },
       emphasis: {
-        lineStyle: {
-          width: 2,
-          color: getColor?.(s, idx),
-        },
+        disabled: true,
+        focus: "none",
       },
       itemStyle: {
         color: getColor?.(s, idx),
