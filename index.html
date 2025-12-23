@@ -47,24 +47,40 @@ You should have received a copy of the GNU General Public License along with Plo
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 
     <style>
-      /* Custom scrollbar */
+      /* Custom scrollbar - Dark Mode */
+      .dark ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      .dark ::-webkit-scrollbar-track {
+        background: #1f2937;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #4b5563;
+        border-radius: 4px;
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #6b7280;
+      }
+
+      /* Custom scrollbar - Light Mode */
       ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
       }
       ::-webkit-scrollbar-track {
-        background: #1f2937;
+        background: #e5e7eb;
       }
       ::-webkit-scrollbar-thumb {
-        background: #4b5563;
+        background: #9ca3af;
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #6b7280;
       }
 
-      /* Loading spinner */
-      .spinner {
+      /* Loading spinner - Dark Mode */
+      .dark .spinner {
         border: 3px solid #374151;
         border-top: 3px solid #3b82f6;
         border-radius: 50%;
@@ -72,6 +88,17 @@ You should have received a copy of the GNU General Public License along with Plo
         height: 24px;
         animation: spin 1s linear infinite;
       }
+
+      /* Loading spinner - Light Mode */
+      .spinner {
+        border: 3px solid #e5e7eb;
+        border-top: 3px solid #3b82f6;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        animation: spin 1s linear infinite;
+      }
+
       @keyframes spin {
         0% {
           transform: rotate(0deg);
@@ -95,7 +122,7 @@ You should have received a copy of the GNU General Public License along with Plo
       }
     </style>
   </head>
-  <body class="bg-gray-900 text-gray-100 min-h-screen">
+  <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen transition-colors duration-200">
     <div id="root"></div>
 
     <script type="text/babel" src="scripts/utils.js"></script>

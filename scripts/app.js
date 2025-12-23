@@ -8,7 +8,7 @@
 // You should have received a copy of the GNU General Public License along with PlotPurr. If not, see <https://www.gnu.org/licenses/>. 
 
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const { FileSelector, ColumnSelector, QuerySettings, StatsDisplay, PlotPanel } = window.Components;
+const { ThemeToggle, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, PlotPanel } = window.Components;
 const { COLORS } = window.Utils;
 
 const getFileKey = (file) => {
@@ -18,6 +18,26 @@ const getFileKey = (file) => {
 };
 
 const App = () => {
+  // Theme management
+  const [theme, setTheme] = useState(() => {
+    const stored = localStorage.getItem("plotpurr-theme");
+    return stored || "dark";
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    localStorage.setItem("plotpurr-theme", theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  }, []);
+
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [columnsByFile, setColumnsByFile] = useState({});
@@ -1018,7 +1038,7 @@ const App = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="bg-gray-800 shadow-lg border-b border-gray-700">
+      <header className="bg-white dark:bg-gray-800 shadow-lg border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
         <div className="max-w-screen-2xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1032,10 +1052,11 @@ const App = () => {
             </div>
 
             <div className="flex items-center gap-4">
+              <ThemeToggle theme={theme} onToggle={toggleTheme} />
               <button
                 onClick={handleResetZoom}
                 disabled={!timeRange}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
               >
                 Reset Zoom
               </button>
@@ -1076,8 +1097,8 @@ const App = () => {
             {selectedFile ? (
               renderLayout(layout)
             ) : (
-              <div className="bg-gray-800 rounded-lg shadow-lg h-[420px] flex items-center justify-center">
-                <div className="text-center text-gray-400">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg h-[420px] flex items-center justify-center border border-gray-200 dark:border-gray-700">
+                <div className="text-center text-gray-500 dark:text-gray-400">
                   <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
@@ -1089,10 +1110,10 @@ const App = () => {
             )}
 
             {currentRange && (
-              <div className="mt-4 bg-gray-800 rounded-lg p-4 shadow-lg">
+              <div className="mt-4 bg-white dark:bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between text-sm">
                   <div>
-                    <span className="text-gray-400">Current Range: </span>
+                    <span className="text-gray-600 dark:text-gray-400">Current Range: </span>
                     <span className="font-mono">
                       {timeUnit === "none"
                         ? currentRange.start
@@ -1106,7 +1127,7 @@ const App = () => {
                               : currentRange.start / 1e6
                           ).toISOString()}
                     </span>
-                    <span className="text-gray-500 mx-2">→</span>
+                    <span className="text-gray-400 dark:text-gray-500 mx-2">→</span>
                     <span className="font-mono">
                       {timeUnit === "none"
                         ? currentRange.end
@@ -1121,8 +1142,8 @@ const App = () => {
                           ).toISOString()}
                     </span>
                   </div>
-                  <div className="text-gray-400">
-                    <span className="text-gray-400">Duration: </span>
+                  <div className="text-gray-600 dark:text-gray-400">
+                    <span className="text-gray-600 dark:text-gray-400">Duration: </span>
                     {(() => {
                       const delta = currentRange.end - currentRange.start;
                       if (timeUnit === "none") {
@@ -1143,9 +1164,9 @@ const App = () => {
         </div>
       </main>
 
-      <footer className="bg-gray-800 border-t border-gray-700 py-3">
+      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-3 transition-colors duration-200">
         <div className="max-w-screen-2xl mx-auto px-4">
-          <div className="flex items-center justify-between text-sm text-gray-400">
+          <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
             <span>PlotPurr v0.1.0</span>
             <span>Extensible data visualization for large datasets</span>
           </div>

@@ -10,6 +10,35 @@
 const { formatBytes, formatNumber, COLORS } = window.Utils;
 const { useEffect, useRef, useState, useCallback } = React;
 
+const ThemeToggle = ({ theme, onToggle }) => {
+  const isDark = theme === "dark";
+
+  return (
+    <button
+      onClick={onToggle}
+      className="relative inline-flex h-8 w-16 items-center rounded-full transition-colors bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500"
+      aria-label="Toggle theme"
+      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      <span
+        className={`inline-flex h-7 w-7 transform items-center justify-center rounded-full bg-white shadow-lg transition-transform ${
+          isDark ? "translate-x-8" : "translate-x-1"
+        }`}
+      >
+        {isDark ? (
+          <svg className="w-4 h-4 text-gray-800" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+          </svg>
+        ) : (
+          <svg className="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+          </svg>
+        )}
+      </span>
+    </button>
+  );
+};
+
 const Spinner = () => (
   <div className="flex items-center justify-center p-4">
     <div className="spinner"></div>
@@ -17,9 +46,9 @@ const Spinner = () => (
 );
 
 const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
-  <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
+  <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-200 dark:border-gray-700">
     <div className="flex items-center justify-between gap-2 mb-3">
-      <h2 className="text-lg font-semibold text-blue-400 flex items-center gap-2">
+      <h2 className="text-lg font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-2">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
@@ -46,7 +75,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
     ) : (
       <div className="space-y-2 max-h-60 overflow-y-auto">
         {files.length === 0 ? (
-          <p className="text-gray-400 text-sm">
+          <p className="text-gray-600 dark:text-gray-400 text-sm">
             {onBrowse ? "No data files selected yet" : "No data files found"}
           </p>
         ) : (
@@ -57,7 +86,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
               className={`w-full text-left p-3 rounded-lg transition-all ${
                 selectedFile?.id === file.id || selectedFile?.path === file.path || selectedFile?.name === file.name
                   ? "bg-blue-600 text-white"
-                  : "bg-gray-700 hover:bg-gray-600 text-gray-200"
+                  : "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-200"
               }`}
               >
               <div className="font-medium truncate" title={file.path || file.name}>
@@ -68,7 +97,7 @@ const FileSelector = ({ files, selectedFile, onSelect, loading, onBrowse }) => (
                   {formatBytes(file.size_bytes)} • {formatNumber(file.row_count)} rows •{" "}
                   {file.format || "Auto"}
                 </div>
-                {file.path && <div className="text-[11px] text-gray-300 truncate">{file.path}</div>}
+                {file.path && <div className="text-[11px] truncate">{file.path}</div>}
               </div>
             </button>
           ))
@@ -102,8 +131,8 @@ const ColumnSelector = ({
   }, [file?.name]);
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
-      <h2 className="text-lg font-semibold mb-3 text-blue-400 flex items-center gap-2">
+    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-200 dark:border-gray-700">
+      <h2 className="text-lg font-semibold mb-3 text-blue-600 dark:text-blue-400 flex items-center gap-2">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
@@ -118,24 +147,24 @@ const ColumnSelector = ({
       {loading ? (
         <Spinner />
       ) : !file ? (
-        <p className="text-gray-400 text-sm">Select a file to browse columns</p>
+        <p className="text-gray-600 dark:text-gray-400 text-sm">Select a file to browse columns</p>
       ) : columns.length === 0 ? (
-        <p className="text-gray-400 text-sm">Select a file first</p>
+        <p className="text-gray-600 dark:text-gray-400 text-sm">Select a file first</p>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center justify-between text-xs text-gray-400 bg-gray-700/40 px-3 py-2 rounded border border-gray-700">
-            <span className="font-medium text-gray-200 truncate" title={file.name}>
+          <div className="flex items-center justify-between text-xs bg-gray-100 dark:bg-gray-700/40 px-3 py-2 rounded border border-gray-300 dark:border-gray-700">
+            <span className="font-medium text-gray-800 dark:text-gray-200 truncate" title={file.name}>
               {file.name}
             </span>
-            <span className="text-gray-400">row count: {formatNumber(file.row_count || 0)}</span>
+            <span className="text-gray-600 dark:text-gray-400">row count: {formatNumber(file.row_count || 0)}</span>
           </div>
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">X-Axis (Time Column)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">X-Axis (Time Column)</label>
               <select
                 value={timeColumn || ""}
                 onChange={(e) => onTimeColumnChange(e.target.value)}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Select time column...</option>
                 {temporalColumns.map((col) => (
@@ -147,11 +176,11 @@ const ColumnSelector = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Time Axis Unit</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Axis Unit</label>
               <select
                 value={timeUnit || "none"}
                 onChange={(e) => onTimeUnitChange?.(e.target.value)}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="none">None (indices)</option>
                 <option value="unix_s">Unix seconds</option>
@@ -164,19 +193,19 @@ const ColumnSelector = ({
 
           <div>
             <div className="flex items-center justify-between gap-2 mb-2">
-              <label className="block text-sm font-medium text-gray-300">Y-Axis Variables</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Y-Axis Variables</label>
               <input
                 type="text"
                 value={yFilter}
                 onChange={(e) => setYFilter(e.target.value)}
                 placeholder="Filter"
-                className="w-40 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-40 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-            <p className="text-xs text-gray-500 mb-2">Drag to a plot. Drop on edges to create split views.</p>
+            <p className="text-xs text-gray-600 dark:text-gray-500 mb-2">Drag to a plot. Drop on edges to create split views.</p>
             <div className="max-h-64 overflow-y-auto space-y-1">
               {filteredNumeric.length === 0 ? (
-                <div className="text-xs text-gray-500 px-2 py-3">No matching numeric columns</div>
+                <div className="text-xs text-gray-600 dark:text-gray-500 px-2 py-3">No matching numeric columns</div>
               ) : (
                 filteredNumeric.map((col, idx) => (
                   <div
@@ -189,19 +218,19 @@ const ColumnSelector = ({
                       e.dataTransfer.effectAllowed = "copy";
                     }}
                     onDoubleClick={() => onColumnAdd?.({ column: col.name, file: fileKey, fileName: file?.name })}
-                    className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-700/60 hover:bg-gray-700 border border-transparent hover:border-gray-600"
+                    className="flex items-center gap-3 p-2 rounded cursor-grab active:cursor-grabbing transition-colors bg-gray-100 dark:bg-gray-700/60 hover:bg-gray-200 dark:hover:bg-gray-700 border border-transparent hover:border-gray-300 dark:hover:border-gray-600"
                   >
                     <span className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
                     <div className="flex-1 min-w-0">
-                      <div className="truncate text-sm text-gray-100">{col.name}</div>
-                      <div className="text-xs text-gray-500">Drag to a plot or double-click to add</div>
+                      <div className="truncate text-sm text-gray-900 dark:text-gray-100">{col.name}</div>
+                      <div className="text-xs text-gray-600 dark:text-gray-500">Drag to a plot or double-click to add</div>
                     </div>
                     {activeColumns.includes(col.name) && (
-                      <span className="text-[10px] text-blue-200 bg-blue-500/10 px-2 py-1 rounded-full border border-blue-500/30">
+                      <span className="text-[10px] text-blue-700 dark:text-blue-200 bg-blue-100 dark:bg-blue-500/10 px-2 py-1 rounded-full border border-blue-300 dark:border-blue-500/30">
                         Active
                       </span>
                     )}
-                    <span className="text-xs text-gray-500">{col.type}</span>
+                    <span className="text-xs text-gray-600 dark:text-gray-500">{col.type}</span>
                   </div>
                 ))
               )}
@@ -217,8 +246,8 @@ const QuerySettings = ({ settings, onChange }) => {
   const tooltipEnabled = settings.showTooltip !== false;
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
-      <h2 className="text-lg font-semibold mb-3 text-blue-400 flex items-center gap-2">
+    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-200 dark:border-gray-700">
+      <h2 className="text-lg font-semibold mb-3 text-blue-600 dark:text-blue-400 flex items-center gap-2">
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
@@ -232,7 +261,7 @@ const QuerySettings = ({ settings, onChange }) => {
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Max Points: {formatNumber(settings.maxPoints)}
           </label>
           <input
@@ -247,11 +276,11 @@ const QuerySettings = ({ settings, onChange }) => {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Downsample Method</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Downsample Method</label>
           <select
             value={settings.downsampleMethod}
             onChange={(e) => onChange({ ...settings, downsampleMethod: e.target.value })}
-            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:ring-2 focus:ring-blue-500"
+            className="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
           >
             <option value="lttb">LTTB (Best Visual)</option>
             <option value="minmax">Min/Max (Peak Preservation)</option>
@@ -259,10 +288,10 @@ const QuerySettings = ({ settings, onChange }) => {
           </select>
         </div>
 
-        <div className="flex items-center justify-between bg-gray-700/40 border border-gray-700 rounded-lg px-3 py-2">
+        <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700/40 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2">
           <div>
-            <label className="block text-sm font-medium text-gray-300">Cursor / Tooltip</label>
-            <p className="text-xs text-gray-500">Show hover line and tooltip on every plot.</p>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Cursor / Tooltip</label>
+            <p className="text-xs text-gray-600 dark:text-gray-500">Show hover line and tooltip on every plot.</p>
           </div>
           <button
             type="button"
@@ -270,7 +299,7 @@ const QuerySettings = ({ settings, onChange }) => {
             aria-checked={tooltipEnabled}
             onClick={() => onChange({ ...settings, showTooltip: !tooltipEnabled })}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              tooltipEnabled ? "bg-blue-500" : "bg-gray-600"
+              tooltipEnabled ? "bg-blue-500" : "bg-gray-400 dark:bg-gray-600"
             }`}
           >
             <span
@@ -286,8 +315,8 @@ const QuerySettings = ({ settings, onChange }) => {
 };
 
 const StatsDisplay = ({ stats }) => (
-  <div className="bg-gray-800 rounded-lg p-4 shadow-lg">
-    <h2 className="text-lg font-semibold mb-3 text-blue-400 flex items-center gap-2">
+  <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-200 dark:border-gray-700">
+    <h2 className="text-lg font-semibold mb-3 text-blue-600 dark:text-blue-400 flex items-center gap-2">
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           strokeLinecap="round"
@@ -301,22 +330,22 @@ const StatsDisplay = ({ stats }) => (
 
     <div className="grid grid-cols-2 gap-4 text-sm">
       <div>
-        <div className="text-gray-400">Total Points</div>
-        <div className="text-xl font-bold">{formatNumber(stats.totalPoints || 0)}</div>
+        <div className="text-gray-600 dark:text-gray-400">Total Points</div>
+        <div className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(stats.totalPoints || 0)}</div>
       </div>
       <div>
-        <div className="text-gray-400">Displayed</div>
-        <div className="text-xl font-bold">{formatNumber(stats.returnedPoints || 0)}</div>
+        <div className="text-gray-600 dark:text-gray-400">Displayed</div>
+        <div className="text-xl font-bold text-gray-900 dark:text-white">{formatNumber(stats.returnedPoints || 0)}</div>
       </div>
       <div>
-        <div className="text-gray-400">Downsampled</div>
-        <div className={`text-lg font-bold ${stats.downsampled ? "text-yellow-400" : "text-green-400"}`}>
+        <div className="text-gray-600 dark:text-gray-400">Downsampled</div>
+        <div className={`text-lg font-bold ${stats.downsampled ? "text-yellow-600 dark:text-yellow-400" : "text-green-600 dark:text-green-400"}`}>
           {stats.downsampled ? "Yes" : "No"}
         </div>
       </div>
       <div>
-        <div className="text-gray-400">Query Time</div>
-        <div className="text-lg font-bold">{stats.queryTime || 0}ms</div>
+        <div className="text-gray-600 dark:text-gray-400">Query Time</div>
+        <div className="text-lg font-bold text-gray-900 dark:text-white">{stats.queryTime || 0}ms</div>
       </div>
     </div>
   </div>
@@ -413,15 +442,15 @@ const PlotPanel = ({
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-lg border border-gray-700/60 overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-gray-300">
-          <span className="px-2 py-1 rounded bg-gray-700/70 text-blue-200 font-semibold">{title}</span>
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700/60 overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <span className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-700/70 text-blue-700 dark:text-blue-200 font-semibold">{title}</span>
           <div className="flex flex-wrap items-center gap-2">
             {series.map((s) => (
               <span
                 key={s.id}
-                className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-700 text-xs text-gray-100 border border-gray-600"
+                className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-xs text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600"
               >
                 <span
                   className="inline-block w-2.5 h-2.5 rounded-full"
@@ -431,21 +460,21 @@ const PlotPanel = ({
                 {s.file} • {s.column}
                 <button
                   onClick={() => onRemoveSeries?.(s.id)}
-                  className="text-gray-400 hover:text-red-400 transition-colors"
+                  className="text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                   title="Remove variable"
                 >
                   ×
                 </button>
               </span>
             ))}
-            {series.length === 0 && <span className="text-xs text-gray-500">Drop variables to plot</span>}
+            {series.length === 0 && <span className="text-xs text-gray-600 dark:text-gray-500">Drop variables to plot</span>}
           </div>
         </div>
         <div className="flex items-center gap-2">
           {canRemovePlot && (
             <button
               onClick={onRemovePlot}
-              className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600 text-gray-200"
+              className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-200"
             >
               Close plot
             </button>
@@ -483,7 +512,7 @@ const PlotPanel = ({
             />
           </div>
         ) : (
-          <div className="h-[360px] flex flex-col items-center justify-center text-gray-500 gap-2">
+          <div className="h-[360px] flex flex-col items-center justify-center text-gray-600 dark:text-gray-500 gap-2">
             <svg className="w-12 h-12 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4-4 4 4 6-6" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 16h-4m0 0v4m0-4v-4" />
@@ -517,7 +546,7 @@ const MinimapChart = ({ seriesList = [], loading, viewRange, fullTimeRange, getC
   useEffect(() => {
     if (!chartRef.current) return;
 
-    chartInstance.current = echarts.init(chartRef.current, "dark");
+    chartInstance.current = echarts.init(chartRef.current);
     chartInstance.current.getZr?.().setSilent?.(true);
 
     const resizeObserver = new ResizeObserver(() => {
@@ -639,10 +668,10 @@ const MinimapChart = ({ seriesList = [], loading, viewRange, fullTimeRange, getC
   }, [viewRange, seriesList]);
 
   return (
-    <div className="relative bg-gray-800/40 rounded-lg border border-gray-700/60 overflow-hidden">
+    <div className="relative bg-gray-100 dark:bg-gray-800/40 rounded-lg border border-gray-300 dark:border-gray-700/60 overflow-hidden">
       {loading && (
-        <div className="absolute inset-0 bg-gray-900/50 flex items-center justify-center z-10">
-          <div className="flex items-center gap-2 text-xs text-gray-200">
+        <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/50 flex items-center justify-center z-10">
+          <div className="flex items-center gap-2 text-xs text-gray-900 dark:text-gray-200">
             <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }}></div>
             <span>Loading overview…</span>
           </div>
@@ -735,7 +764,7 @@ const Chart = ({
   useEffect(() => {
     if (!chartRef.current) return;
 
-    chartInstance.current = echarts.init(chartRef.current, "dark");
+    chartInstance.current = echarts.init(chartRef.current);
 
     const resizeObserver = new ResizeObserver(() => {
       chartInstance.current?.resize();
@@ -1235,14 +1264,14 @@ const Chart = ({
   }, [loading]);
 
   return (
-    <div className="relative bg-gray-800 rounded-lg shadow-lg overflow-hidden">
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-2 bg-gray-900/70 px-2 py-1 rounded border border-gray-700">
+    <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-lg overflow-hidden border border-gray-200 dark:border-transparent">
+      <div className="absolute top-3 left-3 z-20 flex items-center gap-2 bg-white/90 dark:bg-gray-900/70 px-2 py-1 rounded border border-gray-300 dark:border-gray-700">
         <button
           onClick={() => setInteractionMode("box")}
           className={`text-xs px-3 py-1 rounded border transition-colors flex items-center gap-1 ${
             interactionMode === "box"
               ? "bg-blue-600 text-white border-blue-500 shadow"
-              : "bg-gray-800 text-gray-200 border-gray-600 hover:bg-gray-700"
+              : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700"
           }`}
         >
           <span>▭</span>
@@ -1253,21 +1282,21 @@ const Chart = ({
           className={`text-xs px-3 py-1 rounded border transition-colors flex items-center gap-1 ${
             interactionMode === "pan"
               ? "bg-blue-600 text-white border-blue-500 shadow"
-              : "bg-gray-800 text-gray-200 border-gray-600 hover:bg-gray-700"
+              : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-700"
           }`}
         >
           <span>✋</span>
           <span>Pan</span>
         </button>
         {interactionMode === "box" && (
-          <span className="text-[11px] text-blue-100 bg-blue-500/10 border border-blue-500/40 px-2 py-1 rounded">
+          <span className="text-[11px] text-blue-700 dark:text-blue-100 bg-blue-100 dark:bg-blue-500/10 border border-blue-300 dark:border-blue-500/40 px-2 py-1 rounded">
             Drag to select an area
           </span>
         )}
       </div>
       {showLoader && (
-        <div className="absolute inset-0 bg-gray-900/70 flex items-center justify-center z-10">
-          <div className="flex items-center gap-3">
+        <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/70 flex items-center justify-center z-10">
+          <div className="flex items-center gap-3 text-gray-900 dark:text-white">
             <div className="spinner"></div>
             <span>Loading data...</span>
           </div>
@@ -1278,4 +1307,4 @@ const Chart = ({
   );
 };
 
-window.Components = { Spinner, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, Chart, PlotPanel };
+window.Components = { ThemeToggle, Spinner, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, Chart, PlotPanel };
