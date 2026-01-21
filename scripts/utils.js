@@ -387,11 +387,21 @@ const Utils = (() => {
   function buildLttbQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
     const timeOrderExpr = isTimestamp ? `toUnixTimestamp(\`${timeCol}\`)` : `toFloat64(\`${timeCol}\`)`;
-    const lttbValueCol = valueCols[0];
-    const lttbValueExpr = lttbValueCol ? `toFloat64OrZero(toString(\`${lttbValueCol}\`))` : "0";
+
+    // For multiple columns, use combined magnitude (sqrt of sum of squares) for LTTB
+    // This preserves points that are significant in ANY dimension
+    let lttbValueExpr;
+    if (valueCols.length === 1) {
+      lttbValueExpr = `toFloat64OrZero(toString(\`${valueCols[0]}\`))`;
+    } else {
+      const sumOfSquares = valueCols
+        .map((c) => `pow(toFloat64OrZero(toString(\`${c}\`)), 2)`)
+        .join(" + ");
+      lttbValueExpr = `sqrt(${sumOfSquares})`;
+    }
 
     return `-- LTTB downsampling (maxPoints: ${maxPoints})
--- Edit the WHERE clause or add filters as needed
+-- Uses combined magnitude of all columns for point selection
 -- {{START_TIME}} and {{END_TIME}} are replaced with actual values during zoom/pan
 WITH ordered AS (
   SELECT
@@ -416,9 +426,9 @@ ORDER BY o.t_value`;
   }
 
   function buildMinMaxQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
-    const numBuckets = Math.floor(maxPoints / 2);
+    // Adjust buckets based on number of columns to maintain similar point count
+    const numBuckets = Math.floor(maxPoints / (2 * valueCols.length));
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
-    const primaryValueCol = valueCols[0] || timeCol;
 
     let timeOrder;
     let timeOutExpr;
@@ -430,8 +440,19 @@ ORDER BY o.t_value`;
       timeOutExpr = `\`${timeCol}\``;
     }
 
+    // Generate ranking for min/max of EACH value column
+    const rankingCols = valueCols.map((col, idx) => `
+    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${col}\` ASC, t_raw) as rmin_${idx},
+    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${col}\` DESC, t_raw) as rmax_${idx}`
+    ).join(",");
+
+    // Generate WHERE condition to keep min/max rows for ANY column
+    const whereConditions = valueCols.map((_, idx) =>
+      `rmin_${idx} = 1 OR rmax_${idx} = 1`
+    ).join(" OR ");
+
     return `-- Min/Max downsampling (maxPoints: ${maxPoints}, buckets: ${numBuckets})
--- Edit the WHERE clause or add filters as needed
+-- Preserves min/max peaks for ALL value columns
 -- {{START_TIME}} and {{END_TIME}} are replaced with actual values during zoom/pan
 WITH numbered AS (
   SELECT
@@ -453,14 +474,12 @@ ranked AS (
     bucket,
     \`${timeCol}\` as t_raw,
     ${timeOutExpr} as \`${timeCol}\`,
-    ${valueSelects},
-    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${primaryValueCol}\` ASC, t_raw) as rmin,
-    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${primaryValueCol}\` DESC, t_raw) as rmax
+    ${valueSelects},${rankingCols}
   FROM bucketed
 )
 SELECT \`${timeCol}\`, ${valueSelects}
 FROM ranked
-WHERE rmin = 1 OR rmax = 1
+WHERE ${whereConditions}
 ORDER BY \`${timeCol}\``;
   }
 

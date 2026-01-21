@@ -374,23 +374,30 @@ const App = () => {
         // Check if there's custom SQL for this plot
         const plotCustomSql = customSqlByPlot[plot.id];
 
-        const results = await Promise.all(
-          plot.series.map(async (series) => {
-            const columnsMeta = columnsByFile[series.file];
-            if (!columnsMeta) return null;
-            const result = await api.queryData({
-              file: series.file,
-              time_column: series.timeColumn,
-              value_columns: [series.column],
-              start_time: start,
-              end_time: end,
-              max_points: settings.maxPoints,
-              downsample_method: settings.downsampleMethod,
-              columnsMeta,
-              format: series.format || fileFormats[series.file],
-              timeUnit,
-              customSql: plotCustomSql,
-            });
+        let results;
+
+        if (plotCustomSql) {
+          // When custom SQL is active, make ONE query with all columns
+          const firstSeries = plot.series[0];
+          const allValueColumns = plot.series.map((s) => s.column);
+          const columnsMeta = columnsByFile[firstSeries.file];
+
+          const result = await api.queryData({
+            file: firstSeries.file,
+            time_column: firstSeries.timeColumn,
+            value_columns: allValueColumns,
+            start_time: start,
+            end_time: end,
+            max_points: settings.maxPoints,
+            downsample_method: settings.downsampleMethod,
+            columnsMeta,
+            format: firstSeries.format || fileFormats[firstSeries.file],
+            timeUnit,
+            customSql: plotCustomSql,
+          });
+
+          // Distribute results to each series
+          results = plot.series.map((series) => {
             const timeData = result.data?.[series.timeColumn] || [];
             const valueData = result.data?.[series.column] || [];
             const pairs = timeData.map((t, idx) => [t, valueData[idx]]);
@@ -402,8 +409,39 @@ const App = () => {
               returnedPoints: result.returned_points,
               downsampled: result.downsampled,
             };
-          })
-        );
+          });
+        } else {
+          // Normal mode: query each series separately
+          results = await Promise.all(
+            plot.series.map(async (series) => {
+              const columnsMeta = columnsByFile[series.file];
+              if (!columnsMeta) return null;
+              const result = await api.queryData({
+                file: series.file,
+                time_column: series.timeColumn,
+                value_columns: [series.column],
+                start_time: start,
+                end_time: end,
+                max_points: settings.maxPoints,
+                downsample_method: settings.downsampleMethod,
+                columnsMeta,
+                format: series.format || fileFormats[series.file],
+                timeUnit,
+              });
+              const timeData = result.data?.[series.timeColumn] || [];
+              const valueData = result.data?.[series.column] || [];
+              const pairs = timeData.map((t, idx) => [t, valueData[idx]]);
+              return {
+                ...series,
+                name: `${series.fileName || series.file} • ${series.column}`,
+                data: pairs,
+                totalPoints: result.total_points,
+                returnedPoints: result.returned_points,
+                downsampled: result.downsampled,
+              };
+            })
+          );
+        }
 
         const filtered = results.filter(Boolean);
         const queryTime = Math.round(performance.now() - queryStart);

@@ -295,7 +295,45 @@ const api = {
 
         const res = await api.sql(processedSql);
         const dataRows = res.rows || [];
-        const data = resultsToColumnar(dataRows, time_column, value_columns);
+        const resultColumns = res.columns || [];
+
+        // Map columns by name from result, not by position
+        // This handles cases where columns may be reordered or renamed
+        const data = {};
+        const allExpectedCols = [time_column, ...value_columns];
+
+        // Build index map: find which result column index corresponds to each expected column
+        const colIndexMap = {};
+        allExpectedCols.forEach((expectedCol) => {
+          // Try exact match first
+          let idx = resultColumns.indexOf(expectedCol);
+          if (idx === -1) {
+            // Try case-insensitive match
+            idx = resultColumns.findIndex(
+              (rc) => rc.toLowerCase() === expectedCol.toLowerCase()
+            );
+          }
+          colIndexMap[expectedCol] = idx;
+        });
+
+        // Initialize data arrays
+        allExpectedCols.forEach((col) => {
+          data[col] = [];
+        });
+
+        // Populate data using the index map
+        dataRows.forEach((row) => {
+          allExpectedCols.forEach((col) => {
+            const idx = colIndexMap[col];
+            let val = idx >= 0 ? row[idx] : null;
+            if (val !== null && typeof val !== "number") {
+              const n = Number(val);
+              if (!Number.isNaN(n)) val = n;
+            }
+            data[col].push(val);
+          });
+        });
+
         return {
           data,
           total_points: dataRows.length,
