@@ -1,5 +1,6 @@
 {
   "name": "plotpurr",
+  "productName": "PlotPurr",
   "version": "0.1.0",
   "description": "PlotPurr. Desktop wrapper for the ChDB-powered data file viewer.",
   "main": "electron/main.js",

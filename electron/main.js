@@ -98,6 +98,7 @@ const createWindow = () => {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
+    icon: path.join(PROJECT_ROOT, "PlotPurr.png"),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -118,6 +119,7 @@ const startApp = async () => {
   }
 };
 
+app.setName("PlotPurr");
 app.whenReady().then(startApp);
 
 const showFilePicker = async () => {
