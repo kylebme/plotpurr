@@ -403,6 +403,7 @@ const Utils = (() => {
     return `-- LTTB downsampling (maxPoints: ${maxPoints})
 -- Uses combined magnitude of all columns for point selection
 -- {{START_TIME}} and {{END_TIME}} are replaced with actual values during zoom/pan
+-- Note: Downsampling behavior here is very slightly different than auto mode, to make this SQL more readable
 WITH ordered AS (
   SELECT
     ${timeOrderExpr} AS t_order,
@@ -454,6 +455,7 @@ ORDER BY o.t_value`;
     return `-- Min/Max downsampling (maxPoints: ${maxPoints}, buckets: ${numBuckets})
 -- Preserves min/max peaks for ALL value columns
 -- {{START_TIME}} and {{END_TIME}} are replaced with actual values during zoom/pan
+-- Note: Downsampling behavior here is very slightly different than auto mode, to make this SQL more readable
 WITH numbered AS (
   SELECT
     \`${timeCol}\`,
