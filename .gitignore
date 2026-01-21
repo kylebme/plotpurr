@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 node_modules/
 dist/
+.venv/
 .env
 .vscode/
 package-lock.json

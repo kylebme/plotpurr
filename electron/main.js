@@ -7,6 +7,7 @@
 // PlotPurr is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 // You should have received a copy of the GNU General Public License along with PlotPurr. If not, see <https://www.gnu.org/licenses/>. 
 
+const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const { spawn } = require("child_process");
@@ -25,6 +26,29 @@ const DATA_FILE_FILTERS = [
 
 let pythonProcess = null;
 let isQuitting = false;
+
+const getVenvPython = () => {
+  if (process.platform === "win32") {
+    return path.join(PROJECT_ROOT, ".venv", "Scripts", "python.exe");
+  }
+
+  const pythonPath = path.join(PROJECT_ROOT, ".venv", "bin", "python");
+  if (fs.existsSync(pythonPath)) {
+    return pythonPath;
+  }
+
+  return path.join(PROJECT_ROOT, ".venv", "bin", "python3");
+};
+
+const resolvePython = () => {
+  const envPython = process.env.PLOTPURR_PYTHON;
+  if (envPython) return envPython;
+
+  const venvPython = getVenvPython();
+  if (fs.existsSync(venvPython)) return venvPython;
+
+  return process.platform === "win32" ? "python" : "python3";
+};
 
 const waitForServer = (retries = 25, delayMs = 400) =>
   new Promise((resolve, reject) => {
@@ -48,7 +72,7 @@ const waitForServer = (retries = 25, delayMs = 400) =>
 const startPythonServer = async () => {
   if (pythonProcess) return;
 
-  pythonProcess = spawn("python3", [SERVER_SCRIPT], {
+  pythonProcess = spawn(resolvePython(), [SERVER_SCRIPT], {
     cwd: PROJECT_ROOT,
     env: { ...process.env, NO_BROWSER: "1" },
     stdio: "inherit",

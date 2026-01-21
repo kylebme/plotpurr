@@ -282,9 +282,9 @@ const QuerySettings = ({ settings, onChange }) => {
             onChange={(e) => onChange({ ...settings, downsampleMethod: e.target.value })}
             className="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
           >
-            <option value="lttb">LTTB (Best Visual)</option>
-            <option value="minmax">Min/Max (Peak Preservation)</option>
-            <option value="avg">Average</option>
+            <option value="lttb">LTTB (Best Visual, Slow)</option>
+            <option value="minmax">Min/Max (Peak Preservation, Faster)</option>
+            <option value="avg">Average (Fastest)</option>
           </select>
         </div>
 

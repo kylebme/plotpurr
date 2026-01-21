@@ -4,6 +4,8 @@
   "description": "PlotPurr. Desktop wrapper for the ChDB-powered data file viewer.",
   "main": "electron/main.js",
   "scripts": {
+    "setup": "node scripts/setup-venv.js",
+    "postinstall": "node scripts/setup-venv.js",
     "start": "electron .",
     "dev": "electron ."
   },

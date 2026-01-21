@@ -12,15 +12,28 @@ PlotPurr downsamples the input data using Clickhouse and dynamically fetches new
 ## Installation
 
 1. Make sure you have a recent version of Node.js installed.
-2. Clone the repo.
-3. Install dependencies:
+2. Make sure you have Python 3 + pip available (used to create a local venv in `.venv`).
+3. Clone the repo.
+4. Install dependencies:
    ```bash
    npm install
    ```
-4. Start the app:
+5. Start the app:
    ```bash
    npm start
    ```
+
+If the venv setup fails (for example, your Python executable is not named `python3`), run:
+
+```bash
+PLOTPURR_BOOTSTRAP_PYTHON=/path/to/python npm run setup
+```
+
+To force PlotPurr to use a specific Python at runtime:
+
+```bash
+PLOTPURR_PYTHON=/path/to/python npm start
+```
 
 ## Motivation
 
