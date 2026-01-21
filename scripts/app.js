@@ -8,8 +8,8 @@
 // You should have received a copy of the GNU General Public License along with PlotPurr. If not, see <https://www.gnu.org/licenses/>. 
 
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const { ThemeToggle, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, PlotPanel } = window.Components;
-const { COLORS } = window.Utils;
+const { ThemeToggle, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, PlotPanel, SqlEditorModal } = window.Components;
+const { COLORS, buildFullQueryString } = window.Utils;
 
 const getFileKey = (file) => {
   if (!file) return "";
@@ -51,6 +51,14 @@ const App = () => {
     showTooltip: true,
   });
   const [fileFormats, setFileFormats] = useState({});
+  const [customSqlByPlot, setCustomSqlByPlot] = useState({});
+  const [sqlEditorState, setSqlEditorState] = useState({
+    isOpen: false,
+    plotId: null,
+    sql: "",
+    error: null,
+    loading: false,
+  });
 
   const plotCounterRef = useRef(1);
   const seriesCounterRef = useRef(1);
@@ -78,6 +86,7 @@ const App = () => {
   const timeRangeRef = useRef(null);
   const currentRangeRef = useRef(null);
   const fetchRangeRef = useRef(null);
+  const customSqlByPlotRef = useRef({});
 
   useEffect(() => {
     plotsRef.current = plots || [];
@@ -102,6 +111,10 @@ const App = () => {
   useEffect(() => {
     fetchRangeRef.current = fetchRange;
   }, [fetchRange]);
+
+  useEffect(() => {
+    customSqlByPlotRef.current = customSqlByPlot;
+  }, [customSqlByPlot]);
 
   const selectedFileKey = getFileKey(selectedFile);
   const activeColumns = selectedFileKey ? columnsByFile[selectedFileKey] || [] : [];
@@ -130,6 +143,7 @@ const App = () => {
     setPlotLoading({});
     setMinimapData({});
     setFileFormats({});
+    setCustomSqlByPlot({});
     setTimeRange(null);
     setCurrentRange(null);
     setFetchRange(null);
@@ -137,6 +151,13 @@ const App = () => {
     setColumnsByFile({});
     setTimeColumnsByFile({});
     setResetToken((t) => t + 1);
+    setSqlEditorState({
+      isOpen: false,
+      plotId: null,
+      sql: "",
+      error: null,
+      loading: false,
+    });
 
     if (zoomFetchTimerRef.current) {
       clearTimeout(zoomFetchTimerRef.current);
@@ -350,6 +371,9 @@ const App = () => {
       const queryStart = performance.now();
 
       try {
+        // Check if there's custom SQL for this plot
+        const plotCustomSql = customSqlByPlot[plot.id];
+
         const results = await Promise.all(
           plot.series.map(async (series) => {
             const columnsMeta = columnsByFile[series.file];
@@ -365,6 +389,7 @@ const App = () => {
               columnsMeta,
               format: series.format || fileFormats[series.file],
               timeUnit,
+              customSql: plotCustomSql,
             });
             const timeData = result.data?.[series.timeColumn] || [];
             const valueData = result.data?.[series.column] || [];
@@ -444,6 +469,7 @@ const App = () => {
       timeRange?.min,
       timeRange?.max,
       timeUnit,
+      customSqlByPlot,
     ]
   );
 
@@ -516,8 +542,16 @@ const App = () => {
           const plotsSnapshot = plotsRef.current || [];
           const cache = minimapDataRef.current || {};
           const formats = fileFormatsRef.current || {};
+          const customSqlMap = customSqlByPlotRef.current || {};
+
+          // Plots with custom SQL should not use cache
+          const plotsWithCustomSql = new Set(
+            plotsSnapshot.filter((p) => p?.id && customSqlMap[p.id]).map((p) => p.id)
+          );
 
           const hasFullCacheForPlot = (plot) => {
+            // Plots with custom SQL can't use cache
+            if (plotsWithCustomSql.has(plot.id)) return false;
             if (!plot?.series?.length) return true;
             const cached = cache[plot.id] || [];
             const sigSet = new Set(
@@ -809,6 +843,11 @@ const App = () => {
         delete next[plotId];
         return next;
       });
+      setCustomSqlByPlot((prev) => {
+        const next = { ...prev };
+        delete next[plotId];
+        return next;
+      });
     },
     [plots.length, removePlotFromLayout]
   );
@@ -822,6 +861,112 @@ const App = () => {
     },
     [plots, handleVariableDrop]
   );
+
+  const handleOpenSqlEditor = useCallback(
+    (plotId) => {
+      const plot = plots.find((p) => p.id === plotId);
+      if (!plot || !plot.series.length) return;
+
+      // Check if there's already custom SQL for this plot
+      const existingCustomSql = customSqlByPlot[plotId];
+      if (existingCustomSql) {
+        setSqlEditorState({
+          isOpen: true,
+          plotId,
+          sql: existingCustomSql,
+          error: null,
+          loading: false,
+        });
+        return;
+      }
+
+      // Generate auto SQL from the first series with full downsampling query
+      const series = plot.series[0];
+      const columnsMeta = columnsByFile[series.file] || [];
+      const sql = buildFullQueryString({
+        file: series.file,
+        time_column: series.timeColumn,
+        value_columns: plot.series.map((s) => s.column),
+        format: series.format || fileFormats[series.file],
+        timeUnit,
+        columnsMeta,
+        maxPoints: settings.maxPoints,
+        downsampleMethod: settings.downsampleMethod,
+      });
+
+      setSqlEditorState({
+        isOpen: true,
+        plotId,
+        sql: sql || "",
+        error: null,
+        loading: false,
+      });
+    },
+    [plots, customSqlByPlot, columnsByFile, fileFormats, timeUnit, settings.maxPoints, settings.downsampleMethod]
+  );
+
+  const handleSqlEditorClose = useCallback(() => {
+    setSqlEditorState((prev) => ({ ...prev, isOpen: false, error: null }));
+  }, []);
+
+  const handleSqlEditorChange = useCallback((newSql) => {
+    setSqlEditorState((prev) => ({ ...prev, sql: newSql, error: null }));
+  }, []);
+
+  const handleApplySql = useCallback(async () => {
+    const { plotId, sql } = sqlEditorState;
+    if (!plotId || !sql?.trim()) return;
+
+    setSqlEditorState((prev) => ({ ...prev, loading: true, error: null }));
+
+    try {
+      // Pass time range for template replacement during validation
+      const startTime = fetchRange?.start ?? timeRange?.min ?? 0;
+      const endTime = fetchRange?.end ?? timeRange?.max ?? 0;
+      const validation = await api.validateSql(sql, startTime, endTime);
+      if (!validation.valid) {
+        setSqlEditorState((prev) => ({
+          ...prev,
+          loading: false,
+          error: validation.error,
+        }));
+        return;
+      }
+
+      setCustomSqlByPlot((prev) => ({ ...prev, [plotId]: sql }));
+      setSqlEditorState((prev) => ({ ...prev, isOpen: false, loading: false, error: null }));
+
+      // Trigger a refetch for this plot
+      const plot = plots.find((p) => p.id === plotId);
+      if (plot) {
+        fetchPlotData(plot);
+      }
+    } catch (err) {
+      setSqlEditorState((prev) => ({
+        ...prev,
+        loading: false,
+        error: err.message || String(err),
+      }));
+    }
+  }, [sqlEditorState, plots, fetchPlotData, fetchRange, timeRange]);
+
+  const handleResetSql = useCallback(() => {
+    const { plotId } = sqlEditorState;
+    if (!plotId) return;
+
+    setCustomSqlByPlot((prev) => {
+      const next = { ...prev };
+      delete next[plotId];
+      return next;
+    });
+    setSqlEditorState((prev) => ({ ...prev, isOpen: false, error: null }));
+
+    // Trigger a refetch for this plot
+    const plot = plots.find((p) => p.id === plotId);
+    if (plot) {
+      fetchPlotData(plot);
+    }
+  }, [sqlEditorState, plots, fetchPlotData]);
 
   const handleTimeColumnChange = useCallback(
     (newTimeColumn) => {
@@ -926,6 +1071,8 @@ const App = () => {
             canRemovePlot={plots.length > 1}
             getColor={getSeriesColor}
             showTooltip={settings.showTooltip !== false}
+            onOpenSqlEditor={() => handleOpenSqlEditor(plot.id)}
+            hasCustomSql={!!customSqlByPlot[plot.id]}
           />
         </div>
       );
@@ -946,19 +1093,32 @@ const App = () => {
         clearTimeout(zoomFetchTimerRef.current);
         zoomFetchTimerRef.current = null;
       }
+
+      const full = { start: timeRange.min, end: timeRange.max };
+
+      // Check which plots have custom SQL - they need to refetch, not use cache
+      const plotsWithCustomSql = new Set(
+        (plots || []).filter((p) => p?.id && customSqlByPlot[p.id]).map((p) => p.id)
+      );
+
       (plots || []).forEach((plot) => {
         if (!plot?.id) return;
-        plotFetchSeqRef.current[plot.id] = (plotFetchSeqRef.current[plot.id] || 0) + 1;
+        // Only increment seq for plots without custom SQL (they'll use cache)
+        if (!plotsWithCustomSql.has(plot.id)) {
+          plotFetchSeqRef.current[plot.id] = (plotFetchSeqRef.current[plot.id] || 0) + 1;
+        }
       });
       setPlotLoading((prev) => {
         const next = { ...prev };
         (plots || []).forEach((plot) => {
-          if (plot?.id) next[plot.id] = false;
+          // Plots with custom SQL will be loading
+          if (plot?.id && !plotsWithCustomSql.has(plot.id)) {
+            next[plot.id] = false;
+          }
         });
         return next;
       });
 
-      const full = { start: timeRange.min, end: timeRange.max };
       const fr = fetchRangeRef.current;
       const fetchAlreadyFull =
         fr &&
@@ -966,11 +1126,18 @@ const App = () => {
         Number.isFinite(fr.end) &&
         Math.abs(fr.start - full.start) < 1e-4 &&
         Math.abs(fr.end - full.end) < 1e-4;
+
+      // Only skip fetch for plots without custom SQL
       if (!fetchAlreadyFull) {
         (plots || []).forEach((plot) => {
-          if (plot?.id) skipFetchForPlotRef.current[plot.id] = true;
+          if (plot?.id && !plotsWithCustomSql.has(plot.id)) {
+            skipFetchForPlotRef.current[plot.id] = true;
+          }
         });
         setFetchRange(full);
+      } else if (plotsWithCustomSql.size > 0) {
+        // If fetch range is already full but we have custom SQL plots, force refetch
+        setFetchRange({ ...full });
       }
 
       setCurrentRange({
@@ -978,10 +1145,13 @@ const App = () => {
         end: timeRange.max,
       });
 
+      // Only use cached data for plots WITHOUT custom SQL
       setPlotData((prev) => {
         const next = { ...prev };
         (plots || []).forEach((plot) => {
           if (!plot?.id || !plot.series?.length) return;
+          // Skip cache for plots with custom SQL - they'll refetch
+          if (plotsWithCustomSql.has(plot.id)) return;
 
           const cachedList = minimapData[plot.id] || [];
           const cachedBySig = {};
@@ -1017,6 +1187,8 @@ const App = () => {
         const next = { ...prev };
         (plots || []).forEach((plot) => {
           if (!plot?.id || !plot.series?.length) return;
+          // Skip for plots with custom SQL
+          if (plotsWithCustomSql.has(plot.id)) return;
           const cachedList = minimapData[plot.id] || [];
           if (!cachedList.length) return;
           const sigSet = new Set(plot.series.map(buildSeriesSig));
@@ -1172,6 +1344,17 @@ const App = () => {
           </div>
         </div>
       </footer>
+
+      <SqlEditorModal
+        isOpen={sqlEditorState.isOpen}
+        sql={sqlEditorState.sql}
+        error={sqlEditorState.error}
+        loading={sqlEditorState.loading}
+        onClose={handleSqlEditorClose}
+        onApply={handleApplySql}
+        onReset={handleResetSql}
+        onChange={handleSqlEditorChange}
+      />
     </div>
   );
 };

@@ -245,6 +245,21 @@ const api = {
     };
   },
 
+  async validateSql(sql, startTime, endTime) {
+    // Replace template placeholders with actual values for validation
+    let processedSql = sql
+      .replace(/\{\{START_TIME\}\}/g, String(startTime ?? 0))
+      .replace(/\{\{END_TIME\}\}/g, String(endTime ?? 0));
+
+    const testQuery = `${processedSql.trim().replace(/;+$/, "")} LIMIT 0`;
+    try {
+      await api.sql(testQuery);
+      return { valid: true, error: null };
+    } catch (err) {
+      return { valid: false, error: err.message || String(err) };
+    }
+  },
+
   async queryData(params) {
     const {
       file,
@@ -257,6 +272,7 @@ const api = {
       columnsMeta,
       format,
       timeUnit = "none",
+      customSql = null,
     } = params;
 
     if (!file || !time_column || !value_columns?.length) {
@@ -267,6 +283,30 @@ const api = {
         downsampled: false,
         downsample_method: null,
       };
+    }
+
+    // If custom SQL is provided, execute it with template replacement
+    if (customSql) {
+      try {
+        // Replace template placeholders with actual time values
+        let processedSql = customSql
+          .replace(/\{\{START_TIME\}\}/g, String(start_time))
+          .replace(/\{\{END_TIME\}\}/g, String(end_time));
+
+        const res = await api.sql(processedSql);
+        const dataRows = res.rows || [];
+        const data = resultsToColumnar(dataRows, time_column, value_columns);
+        return {
+          data,
+          total_points: dataRows.length,
+          returned_points: dataRows.length,
+          downsampled: true,
+          downsample_method: "custom",
+          customSql: true,
+        };
+      } catch (err) {
+        throw new Error(`Custom SQL error: ${err.message || err}`);
+      }
     }
 
     let colType = null;
@@ -285,7 +325,7 @@ const api = {
     const tableExpr = fileTable(file, format);
 
     const countQuery = `
-      SELECT COUNT(*) AS cnt 
+      SELECT COUNT(*) AS cnt
       FROM ${tableExpr}
       ${whereSql}
     `;

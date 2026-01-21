@@ -298,6 +298,214 @@ const Utils = (() => {
     "#6366f1",
   ];
 
+  function buildFullQueryString(params) {
+    const {
+      file,
+      time_column,
+      value_columns,
+      format,
+      timeUnit = "none",
+      columnsMeta = [],
+      maxPoints = 10000,
+      downsampleMethod = "minmax",
+    } = params;
+
+    if (!file || !time_column || !value_columns?.length) {
+      return "";
+    }
+
+    const FORMAT_BY_EXT = {
+      ".parquet": "Parquet",
+      ".csv": "CSVWithNames",
+      ".tsv": "TSVWithNames",
+      ".json": "JSONEachRow",
+      ".jsonl": "JSONEachRow",
+      ".ndjson": "JSONEachRow",
+      ".arrow": "Arrow",
+      ".feather": "Arrow",
+      ".orc": "ORC",
+      ".avro": "Avro",
+    };
+
+    const inferFmt = (fileName, hint) => {
+      if (hint) return hint;
+      if (!fileName) return null;
+      const lower = fileName.toLowerCase();
+      const extMatch = lower.match(/(\.[^.]+)$/);
+      const ext = extMatch ? extMatch[1] : "";
+      return FORMAT_BY_EXT[ext] || null;
+    };
+
+    const escapeFilePath = (f) => String(f || "").replace(/'/g, "\\'");
+    const fmt = inferFmt(file, format) || "Parquet";
+    const safeFormat = fmt.replace(/[^A-Za-z]/g, "") || "Parquet";
+    const tableExpr = `file('${escapeFilePath(file)}', '${safeFormat}')`;
+
+    let colType = null;
+    if (columnsMeta?.length) {
+      const meta = columnsMeta.find((c) => c.name === time_column);
+      if (meta) colType = meta.type;
+    }
+    const isTs = colType ? isTimestampType(colType) : false;
+
+    // Use template placeholders for time range so zooming still works
+    const whereSql = buildTimeFilterTemplated(time_column, isTs, timeUnit);
+
+    // Generate the full downsampling query
+    let query;
+    if (downsampleMethod === "minmax") {
+      query = buildMinMaxQueryTemplated(tableExpr, time_column, value_columns, whereSql, maxPoints, isTs);
+    } else if (downsampleMethod === "avg") {
+      query = buildAvgQueryTemplated(tableExpr, time_column, value_columns, whereSql, maxPoints, isTs);
+    } else {
+      query = buildLttbQueryTemplated(tableExpr, time_column, value_columns, whereSql, maxPoints, isTs);
+    }
+
+    return query;
+  }
+
+  function buildTimeFilterTemplated(timeColumn, isTimestamp, timeUnit = "none") {
+    const clauses = [];
+
+    const buildTimestampExpr = (placeholder) => {
+      if (!isTimestamp) return placeholder;
+      if (timeUnit === "unix_ms") return `toDateTime64(${placeholder} / 1000, 3)`;
+      if (timeUnit === "unix_us") return `toDateTime64(${placeholder} / 1e6, 6)`;
+      if (timeUnit === "unix_ns") return `toDateTime64(${placeholder} / 1e9, 9)`;
+      return `toDateTime(${placeholder})`;
+    };
+
+    const startBound = isTimestamp ? buildTimestampExpr("{{START_TIME}}") : "{{START_TIME}}";
+    const endBound = isTimestamp ? buildTimestampExpr("{{END_TIME}}") : "{{END_TIME}}";
+
+    clauses.push(`\`${timeColumn}\` >= ${startBound}`);
+    clauses.push(`\`${timeColumn}\` <= ${endBound}`);
+
+    return `WHERE ${clauses.join(" AND ")}`;
+  }
+
+  function buildLttbQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+    const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
+    const timeOrderExpr = isTimestamp ? `toUnixTimestamp(\`${timeCol}\`)` : `toFloat64(\`${timeCol}\`)`;
+    const lttbValueCol = valueCols[0];
+    const lttbValueExpr = lttbValueCol ? `toFloat64OrZero(toString(\`${lttbValueCol}\`))` : "0";
+
+    return `-- LTTB downsampling (maxPoints: ${maxPoints})
+-- Edit the WHERE clause or add filters as needed
+-- {{START_TIME}} and {{END_TIME}} are replaced with actual values during zoom/pan
+WITH ordered AS (
+  SELECT
+    ${timeOrderExpr} AS t_order,
+    \`${timeCol}\` AS t_value,
+    ${valueSelects},
+    row_number() OVER (ORDER BY ${timeOrderExpr}) AS rn,
+    toFloat64(row_number() OVER (ORDER BY ${timeOrderExpr})) AS rn_f
+  FROM ${source}
+  ${whereSql}
+),
+sampled AS (
+  SELECT arrayJoin(lttb(${maxPoints})(rn_f, ${lttbValueExpr})) AS point
+  FROM ordered
+)
+SELECT
+  o.t_value AS \`${timeCol}\`,
+  ${valueCols.map((c) => `o.\`${c}\``).join(", ")}
+FROM sampled s
+JOIN ordered o ON o.rn = toUInt64(point.1)
+ORDER BY o.t_value`;
+  }
+
+  function buildMinMaxQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+    const numBuckets = Math.floor(maxPoints / 2);
+    const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
+    const primaryValueCol = valueCols[0] || timeCol;
+
+    let timeOrder;
+    let timeOutExpr;
+    if (isTimestamp) {
+      timeOrder = `\`${timeCol}\``;
+      timeOutExpr = `toUnixTimestamp(\`${timeCol}\`)`;
+    } else {
+      timeOrder = `\`${timeCol}\``;
+      timeOutExpr = `\`${timeCol}\``;
+    }
+
+    return `-- Min/Max downsampling (maxPoints: ${maxPoints}, buckets: ${numBuckets})
+-- Edit the WHERE clause or add filters as needed
+-- {{START_TIME}} and {{END_TIME}} are replaced with actual values during zoom/pan
+WITH numbered AS (
+  SELECT
+    \`${timeCol}\`,
+    ${valueSelects},
+    ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
+    COUNT(*) OVER () as total
+  FROM ${source}
+  ${whereSql}
+),
+bucketed AS (
+  SELECT
+    *,
+    FLOOR((rn - 1) * CAST(${numBuckets} AS Float64) / NULLIF(total, 0)) as bucket
+  FROM numbered
+),
+ranked AS (
+  SELECT
+    bucket,
+    \`${timeCol}\` as t_raw,
+    ${timeOutExpr} as \`${timeCol}\`,
+    ${valueSelects},
+    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${primaryValueCol}\` ASC, t_raw) as rmin,
+    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY \`${primaryValueCol}\` DESC, t_raw) as rmax
+  FROM bucketed
+)
+SELECT \`${timeCol}\`, ${valueSelects}
+FROM ranked
+WHERE rmin = 1 OR rmax = 1
+ORDER BY \`${timeCol}\``;
+  }
+
+  function buildAvgQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+    const numBuckets = maxPoints;
+    const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
+
+    let timeAgg;
+    let timeOrder;
+    if (isTimestamp) {
+      timeAgg = `toUnixTimestamp(min(\`${timeCol}\`)) as \`${timeCol}\``;
+      timeOrder = `\`${timeCol}\``;
+    } else {
+      timeAgg = `AVG(\`${timeCol}\`) as \`${timeCol}\``;
+      timeOrder = `\`${timeCol}\``;
+    }
+
+    const avgSelects = valueCols.map((c) => `AVG(\`${c}\`) as \`${c}\``).join(", ");
+
+    return `-- Average downsampling (maxPoints: ${maxPoints})
+-- Edit the WHERE clause or add filters as needed
+-- {{START_TIME}} and {{END_TIME}} are replaced with actual values during zoom/pan
+WITH numbered AS (
+  SELECT
+    \`${timeCol}\`,
+    ${valueSelects},
+    ROW_NUMBER() OVER (ORDER BY ${timeOrder}) as rn,
+    COUNT(*) OVER () as total
+  FROM ${source}
+  ${whereSql}
+),
+bucketed AS (
+  SELECT
+    *,
+    FLOOR((rn - 1) * CAST(${numBuckets} AS Float64) / NULLIF(total, 0)) as bucket
+  FROM numbered
+)
+SELECT
+  ${timeAgg},
+  ${avgSelects}
+FROM bucketed
+GROUP BY bucket
+ORDER BY \`${timeCol}\``;
+  }
+
   return {
     formatBytes,
     formatNumber,
@@ -311,6 +519,7 @@ const Utils = (() => {
     buildMinMaxQuery,
     buildAvgQuery,
     resultsToColumnar,
+    buildFullQueryString,
     COLORS,
   };
 })();
