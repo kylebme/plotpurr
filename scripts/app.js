@@ -49,6 +49,7 @@ const App = () => {
     maxPoints: 10000,
     downsampleMethod: "minmax",
     showTooltip: true,
+    showGrid: true,
   });
   const [fileFormats, setFileFormats] = useState({});
   const [customSqlByPlot, setCustomSqlByPlot] = useState({});
@@ -1111,6 +1112,8 @@ const App = () => {
             showTooltip={settings.showTooltip !== false}
             onOpenSqlEditor={() => handleOpenSqlEditor(plot.id)}
             hasCustomSql={!!customSqlByPlot[plot.id]}
+            theme={theme}
+            showGrid={settings.showGrid !== false}
           />
         </div>
       );

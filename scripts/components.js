@@ -244,6 +244,7 @@ const ColumnSelector = ({
 
 const QuerySettings = ({ settings, onChange }) => {
   const tooltipEnabled = settings.showTooltip !== false;
+  const gridEnabled = settings.showGrid !== false;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-lg border border-gray-200 dark:border-gray-700">
@@ -260,18 +261,18 @@ const QuerySettings = ({ settings, onChange }) => {
       </h2>
 
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Max Points: {formatNumber(settings.maxPoints)}
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+            Max Points
           </label>
           <input
-            type="range"
+            type="number"
             min="1000"
-            max="20000"
+            max="100000"
             step="500"
             value={settings.maxPoints}
-            onChange={(e) => onChange({ ...settings, maxPoints: parseInt(e.target.value) })}
-            className="w-full"
+            onChange={(e) => onChange({ ...settings, maxPoints: parseInt(e.target.value) || 1000 })}
+            className="w-32 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
 
@@ -305,6 +306,28 @@ const QuerySettings = ({ settings, onChange }) => {
             <span
               className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
                 tooltipEnabled ? "translate-x-5" : "translate-x-1"
+              }`}
+            ></span>
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between bg-gray-100 dark:bg-gray-700/40 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Grid Lines</label>
+            <p className="text-xs text-gray-600 dark:text-gray-500">Show grid lines on plots.</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={gridEnabled}
+            onClick={() => onChange({ ...settings, showGrid: !gridEnabled })}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              gridEnabled ? "bg-blue-500" : "bg-gray-400 dark:bg-gray-600"
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                gridEnabled ? "translate-x-5" : "translate-x-1"
               }`}
             ></span>
           </button>
@@ -407,6 +430,8 @@ const PlotPanel = ({
   showTooltip,
   onOpenSqlEditor,
   hasCustomSql,
+  theme = "dark",
+  showGrid = true,
 }) => {
   const dropRef = useRef(null);
   const [dropZone, setDropZone] = useState(null);
@@ -506,6 +531,8 @@ const PlotPanel = ({
               resetToken={resetToken}
               showTooltip={showTooltip}
               timeUnit={timeUnit}
+              theme={theme}
+              showGrid={showGrid}
             />
             <MinimapChart
               seriesList={minimapSeries || series}
@@ -697,6 +724,8 @@ const Chart = ({
   resetToken,
   showTooltip = true,
   timeUnit = "none",
+  theme = "dark",
+  showGrid = true,
 }) => {
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
@@ -890,7 +919,8 @@ const Chart = ({
           lineStyle: { color: "#374151" },
         },
         splitLine: {
-          lineStyle: { color: "#1f2937" },
+          show: showGrid,
+          lineStyle: { color: theme === "dark" ? "#314156ff" : "#e3e4e5ff" },
         },
       },
       yAxis: {
@@ -905,7 +935,8 @@ const Chart = ({
           lineStyle: { color: "#374151" },
         },
         splitLine: {
-          lineStyle: { color: "#1f2937" },
+          show: showGrid,
+          lineStyle: { color: theme === "dark" ? "#314156ff" : "#e3e4e5ff" },
         },
       },
       brush: interactionMode === "box"
@@ -1047,7 +1078,7 @@ const Chart = ({
         zoomRafRef.current = null;
       }
     };
-  }, [seriesList, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip, formatAxisTick, formatTooltipTime]);
+  }, [seriesList, fullTimeRange, interactionMode, getColor, emitZoom, shiftDown, showTooltip, formatAxisTick, formatTooltipTime, theme, showGrid]);
 
   useEffect(() => {
     if (!chartInstance.current || !viewRange) return;
