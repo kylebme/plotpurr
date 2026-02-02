@@ -98,7 +98,7 @@ const createWindow = () => {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
-    icon: path.join(PROJECT_ROOT, "PlotPurr.png"),
+    icon: path.join(PROJECT_ROOT, "public", "PlotPurr.png"),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -106,7 +106,14 @@ const createWindow = () => {
     },
   });
 
-  win.loadURL(SERVER_URL);
+  const url = new URL(SERVER_URL);
+  url.searchParams.set("v", Date.now().toString());
+  win.webContents.session
+    .clearCache()
+    .catch((err) => console.warn("Failed to clear cache", err))
+    .finally(() => {
+      win.loadURL(url.toString());
+    });
 };
 
 const startApp = async () => {

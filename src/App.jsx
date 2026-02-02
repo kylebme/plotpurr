@@ -7,9 +7,18 @@
 // PlotPurr is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 // You should have received a copy of the GNU General Public License along with PlotPurr. If not, see <https://www.gnu.org/licenses/>. 
 
-const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const { ThemeToggle, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, PlotPanel, SqlEditorModal } = window.Components;
-const { COLORS, buildFullQueryString } = window.Utils;
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  ThemeToggle,
+  FileSelector,
+  ColumnSelector,
+  QuerySettings,
+  StatsDisplay,
+  PlotPanel,
+  SqlEditorModal,
+} from "./components.jsx";
+import { COLORS, buildFullQueryString } from "./utils.js";
+import api from "./api.js";
 
 const getFileKey = (file) => {
   if (!file) return "";
@@ -1256,11 +1265,7 @@ const App = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-gray-200 rounded-lg p-1">
-                <img
-                  src="./PlotPurr.png"
-                  alt="PlotPurr"
-                  className="h-12 w-auto"
-                />
+                <img src="/PlotPurr.png" alt="PlotPurr" className="h-12 w-auto" />
               </div>
             </div>
 
@@ -1400,5 +1405,4 @@ const App = () => {
   );
 };
 
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+export default App;

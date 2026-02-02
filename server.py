@@ -29,7 +29,11 @@ import webbrowser
 # Configuration
 HOST = "localhost"
 PORT = 8765
-PARQUET_DIR = Path(".").resolve()
+PROJECT_ROOT = Path(".").resolve()
+PARQUET_DIR = PROJECT_ROOT
+STATIC_DIR = PROJECT_ROOT / "dist"
+if not STATIC_DIR.exists():
+    STATIC_DIR = PROJECT_ROOT
 LOG_LEVEL = logging.INFO
 
 SUPPORTED_FORMATS = {
@@ -65,8 +69,8 @@ class ChDBRequestHandler(SimpleHTTPRequestHandler):
     """
 
     def __init__(self, *args, **kwargs):
-        # Serve files from PARQUET_DIR
-        super().__init__(*args, directory=str(PARQUET_DIR), **kwargs)
+        # Serve built assets when available; fall back to source for development.
+        super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
     # ---------- Helpers ----------
 

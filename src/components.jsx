@@ -7,8 +7,9 @@
 // PlotPurr is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 // You should have received a copy of the GNU General Public License along with PlotPurr. If not, see <https://www.gnu.org/licenses/>. 
 
-const { formatBytes, formatNumber, COLORS } = window.Utils;
-const { useEffect, useRef, useState, useCallback } = React;
+import { useEffect, useRef, useState, useCallback } from "react";
+import * as echarts from "echarts";
+import { formatBytes, formatNumber, COLORS } from "./utils.js";
 
 const ThemeToggle = ({ theme, onToggle }) => {
   const isDark = theme === "dark";
@@ -1432,4 +1433,15 @@ const EditSqlButton = ({ hasCustomSql, onClick }) => (
   </button>
 );
 
-window.Components = { ThemeToggle, Spinner, FileSelector, ColumnSelector, QuerySettings, StatsDisplay, Chart, PlotPanel, SqlEditorModal, EditSqlButton };
+export {
+  ThemeToggle,
+  Spinner,
+  FileSelector,
+  ColumnSelector,
+  QuerySettings,
+  StatsDisplay,
+  Chart,
+  PlotPanel,
+  SqlEditorModal,
+  EditSqlButton,
+};

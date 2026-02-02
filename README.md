@@ -1,6 +1,6 @@
 # PlotPurr
 
-<p align="center"><img src="PlotPurr.png" width=50%></p>
+<p align="center"><img src="public/PlotPurr.png" width=50%></p>
 
 An experimental plotting playground designed for very large timeseries datasets.
 PlotPurr downsamples the input data using Clickhouse and dynamically fetches new data as you zoom in.

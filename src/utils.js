@@ -7,8 +7,7 @@
 // PlotPurr is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 // You should have received a copy of the GNU General Public License along with PlotPurr. If not, see <https://www.gnu.org/licenses/>. 
 
-const Utils = (() => {
-  const formatBytes = (bytes) => {
+const formatBytes = (bytes) => {
     if (bytes === 0) return "0 Bytes";
     const k = 1024;
     const sizes = ["Bytes", "KB", "MB", "GB"];
@@ -16,19 +15,19 @@ const Utils = (() => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
-  const formatNumber = (num) => {
+const formatNumber = (num) => {
     return new Intl.NumberFormat().format(num);
   };
 
-  const debounce = (func, wait) => {
+function debounce(func, wait) {
     let timeout;
-    return (...args) => {
+    return function (...args) {
       clearTimeout(timeout);
       timeout = setTimeout(() => func.apply(this, args), wait);
     };
-  };
+}
 
-  function isTimestampType(dtype = "") {
+function isTimestampType(dtype = "") {
     const lower = String(dtype).toLowerCase();
     return (
       lower.includes("timestamp") ||
@@ -38,7 +37,7 @@ const Utils = (() => {
     );
   }
 
-  function categorizeType(dtype = "") {
+function categorizeType(dtype = "") {
     const lower = String(dtype).toLowerCase();
 
     if (
@@ -76,7 +75,7 @@ const Utils = (() => {
     return "other";
   }
 
-  function toEpoch(value) {
+function toEpoch(value) {
     if (value == null) return null;
     if (typeof value === "number") return value;
     if (typeof value === "string") {
@@ -90,7 +89,7 @@ const Utils = (() => {
     return null;
   }
 
-  function buildTimeFilter(timeColumn, startTime, endTime, isTimestamp, timeUnit = "none") {
+function buildTimeFilter(timeColumn, startTime, endTime, isTimestamp, timeUnit = "none") {
     const clauses = [];
 
     // start/end are expressed in the selected timeUnit (seconds, ms, µs, ns).
@@ -121,7 +120,7 @@ const Utils = (() => {
     return clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   }
 
-  function getTimeSelectExpr(timeColumn, isTimestamp, timeUnit) {
+function getTimeSelectExpr(timeColumn, isTimestamp, timeUnit) {
     // Always emit numeric seconds for timestamp columns (with sub-second precision when requested)
     if (!isTimestamp) {
       return `\`${timeColumn}\``;
@@ -143,7 +142,7 @@ const Utils = (() => {
     return `toUnixTimestamp(\`${timeColumn}\`) as \`${timeColumn}\``;
   }
 
-  function buildLttbQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+function buildLttbQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
     const timeOrderExpr = isTimestamp ? `toUnixTimestamp(\`${timeCol}\`)` : `toFloat64(\`${timeCol}\`)`;
     const lttbValueCol = valueCols[0];
@@ -173,7 +172,7 @@ const Utils = (() => {
     `;
   }
 
-  function buildMinMaxQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+function buildMinMaxQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = Math.floor(maxPoints / 2);
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
     const primaryValueCol = valueCols[0] || timeCol;
@@ -221,7 +220,7 @@ const Utils = (() => {
     `;
   }
 
-  function buildAvgQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+function buildAvgQuery(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = maxPoints;
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
 
@@ -262,7 +261,7 @@ const Utils = (() => {
     `;
   }
 
-  function resultsToColumnar(rows, timeCol, valueCols) {
+function resultsToColumnar(rows, timeCol, valueCols) {
     const columns = [timeCol, ...valueCols];
     const data = {};
     columns.forEach((c) => {
@@ -285,7 +284,7 @@ const Utils = (() => {
     return data;
   }
 
-  const COLORS = [
+const COLORS = [
     "#3b82f6",
     "#ef4444",
     "#10b981",
@@ -298,7 +297,7 @@ const Utils = (() => {
     "#6366f1",
   ];
 
-  function buildFullQueryString(params) {
+function buildFullQueryString(params) {
     const {
       file,
       time_column,
@@ -364,7 +363,7 @@ const Utils = (() => {
     return query;
   }
 
-  function buildTimeFilterTemplated(timeColumn, isTimestamp, timeUnit = "none") {
+function buildTimeFilterTemplated(timeColumn, isTimestamp, timeUnit = "none") {
     const clauses = [];
 
     const buildTimestampExpr = (placeholder) => {
@@ -384,7 +383,7 @@ const Utils = (() => {
     return `WHERE ${clauses.join(" AND ")}`;
   }
 
-  function buildLttbQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+function buildLttbQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
     const timeOrderExpr = isTimestamp ? `toUnixTimestamp(\`${timeCol}\`)` : `toFloat64(\`${timeCol}\`)`;
 
@@ -426,7 +425,7 @@ JOIN ordered o ON o.rn = toUInt64(point.1)
 ORDER BY o.t_value`;
   }
 
-  function buildMinMaxQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+function buildMinMaxQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     // Adjust buckets based on number of columns to maintain similar point count
     const numBuckets = Math.floor(maxPoints / (2 * valueCols.length));
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
@@ -485,7 +484,7 @@ WHERE ${whereConditions}
 ORDER BY \`${timeCol}\``;
   }
 
-  function buildAvgQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
+function buildAvgQueryTemplated(source, timeCol, valueCols, whereSql, maxPoints, isTimestamp) {
     const numBuckets = maxPoints;
     const valueSelects = valueCols.map((c) => `\`${c}\``).join(", ");
 
@@ -527,22 +526,19 @@ GROUP BY bucket
 ORDER BY \`${timeCol}\``;
   }
 
-  return {
-    formatBytes,
-    formatNumber,
-    debounce,
-    isTimestampType,
-    categorizeType,
-    toEpoch,
-    buildTimeFilter,
-    getTimeSelectExpr,
-    buildLttbQuery,
-    buildMinMaxQuery,
-    buildAvgQuery,
-    resultsToColumnar,
-    buildFullQueryString,
-    COLORS,
-  };
-})();
-
-window.Utils = Utils;
+export {
+  formatBytes,
+  formatNumber,
+  debounce,
+  isTimestampType,
+  categorizeType,
+  toEpoch,
+  buildTimeFilter,
+  getTimeSelectExpr,
+  buildLttbQuery,
+  buildMinMaxQuery,
+  buildAvgQuery,
+  resultsToColumnar,
+  buildFullQueryString,
+  COLORS,
+};
